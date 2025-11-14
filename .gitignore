@@ -133,8 +133,6 @@ dmypy.json
 # Database Object Dependency Graph Scanner specific ignores
 
 # Database credentials and configuration
-config.py
-src/config.py
 *.db
 *.sqlite
 *.sqlite3
