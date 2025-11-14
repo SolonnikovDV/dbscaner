@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Database Dependencies Visualizer - © 2025 Dmitry Solonnikov</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .node {
+            cursor: pointer;
+        }
+        .node circle {
+            stroke: #fff;
+            stroke-width: 1.5px;
+        }
+        .link {
+            fill: none;
+            stroke: #999;
+            stroke-opacity: 0.6;
+            stroke-width: 1.5px;
+        }
+        .tooltip {
+            position: absolute;
+            background-color: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            pointer-events: none;
+            max-width: 500px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        #main-container {
+            display: flex;
+            height: calc(100vh - 80px); /* Используем всю доступную высоту экрана минус верхняя панель */
+        }
+        #ddl-container {
+            width: 35%;
+            height: 100%;
+            border: 1px solid #ddd;
+            padding: 10px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+            resize: horizontal;
+            min-width: 250px;
+            max-width: 70%;
+            display: flex;
+            flex-direction: column;
+        }
+        #ddl-display {
+            width: 100%;
+            flex: 1;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            border: none;
+            background-color: transparent;
+            resize: none;
+            font-size: 12px;
+            line-height: 1.4;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        #graph-container {
+            width: 65%;
+            flex: 1; /* Используем flex для равной высоты */
+            border: 1px solid #ddd;
+        }
+        #legend {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 13px;
+            z-index: 1000;
+            max-width: 220px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.3s ease;
+        }
+        #legend.collapsed {
+            padding: 8px 12px;
+        }
+        #legend.collapsed .legend-content {
+            display: none;
+        }
+        #legend.collapsed .legend-header::after {
+            content: " ▶";
+        }
+        .legend-header {
+            font-weight: bold;
+            margin-bottom: 5px;
+            cursor: pointer;
+        }
+        .legend-header::after {
+            content: " ▼";
+        }
+        .legend-content {
+            display: block;
+        }
+        .controls {
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .highlighted-object {
+            cursor: pointer;
+            border-radius: 3px;
+            padding: 0 2px;
+            transition: all 0.2s ease;
+        }
+        .highlighted-object:hover {
+            transform: scale(1.05);
+            filter: brightness(1.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <label>Schema: </label>
+        <select id="schema-select"></select>
+        <label>Object: </label>
+        <select id="object-select"></select>
+        <button onclick="loadGraph()">Load Graph</button>
+    </div>
+    <div id="legend">
+        <div class="legend-header">Легенда</div>
+        <div class="legend-content"></div>
+    </div>
+    <div id="main-container">
+        <div id="ddl-container">
+            <h3>DDL</h3>
+            <textarea id="ddl-display" readonly></textarea>
+        </div>
+        <div id="graph-container"></div>
+    </div>
+
+    <script>
+        let svg;
+        let simulation;
+        let tooltip;
+        let data; // Глобальная переменная для хранения данных графа
+        let isDraggingLegend = false;
+        let legendOffsetX = 0;
+        let legendOffsetY = 0;
+
+        // Инициализация
+        function init() {
+            svg = d3.select("#graph-container")
+                .append("svg")
+                .attr("width", "100%")
+                .attr("height", "100%");
+
+            tooltip = d3.select("body")
+                .append("div")
+                .attr("class", "tooltip")
+                .style("opacity", 0);
+
+            // Загрузка списка схем
+            fetch('/schemas')
+                .then(response => response.json())
+                .then(schemas => {
+                    const schemaSelect = document.getElementById('schema-select');
+                    schemas.forEach(schema => {
+                        const option = document.createElement('option');
+                        option.value = schema;
+                        option.textContent = schema;
+                        schemaSelect.appendChild(option);
+                    });
+                    loadObjects(schemaSelect.value);
+                });
+
+            // Обработчик изменения схемы
+            document.getElementById('schema-select').addEventListener('change', (e) => {
+                loadObjects(e.target.value);
+            });
+        }
+
+        // Загрузка объектов для выбранной схемы
+        function loadObjects(schema) {
+            fetch(`/objects/${schema}`)
+                .then(response => response.json())
+                .then(objects => {
+                    const objectSelect = document.getElementById('object-select');
+                    objectSelect.innerHTML = '';
+                    objects.forEach(obj => {
+                        const option = document.createElement('option');
+                        option.value = obj.name;
+                        option.textContent = `${obj.name} (${obj.type})`;
+                        objectSelect.appendChild(option);
+                    });
+                });
+        }
+
+        // Загрузка и отображение графа
+        function loadGraph() {
+            const schema = document.getElementById('schema-select').value;
+            const object = document.getElementById('object-select').value;
+
+            fetch(`/graph/${schema}/${object}`)
+                .then(response => response.json())
+                .then(data => {
+                    drawGraph(data);
+                });
+        }
+
+        // Отрисовка графа
+        function drawGraph(graphData) {
+            data = graphData; // Сохраняем данные в глобальную переменную
+            svg.selectAll("*").remove();
+
+            console.log("Drawing graph with data:", data);
+
+            if (!data.nodes || data.nodes.length === 0) {
+                console.log("No nodes to display");
+                // Показываем сообщение об отсутствии данных
+                svg.append("text")
+                    .attr("x", svg.node().getBoundingClientRect().width / 2)
+                    .attr("y", svg.node().getBoundingClientRect().height / 2)
+                    .attr("text-anchor", "middle")
+                    .style("font-size", "16px")
+                    .style("fill", "#666")
+                    .text("Нет данных для отображения");
+                return;
+            }
+
+            const width = svg.node().getBoundingClientRect().width;
+            const height = svg.node().getBoundingClientRect().height;
+
+            console.log(`Canvas size: ${width}x${height}`);
+            console.log(`Nodes: ${data.nodes.length}, Links: ${data.links.length}`);
+
+            // Создаем симуляцию с лучшими настройками для больших графов
+            simulation = d3.forceSimulation(data.nodes)
+                .force("link", d3.forceLink(data.links).id(d => d.id).distance(d => {
+                    // Увеличиваем расстояние для больших графов
+                    const baseDistance = Math.max(80, Math.min(200, data.nodes.length * 5));
+                    return d.type === 'depends_on' ? baseDistance : baseDistance * 1.2;
+                }))
+                .force("charge", d3.forceManyBody().strength(d => {
+                    // Сила отталкивания зависит от количества узлов
+                    return Math.max(-1000, -50 * data.nodes.length);
+                }))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collision", d3.forceCollide().radius(d => d.isCentral ? 30 : 20));
+
+            // Создаем стрелки
+            svg.append("defs").selectAll("marker")
+                .data(["arrow-depends-on", "arrow-used-by"])
+                .enter().append("marker")
+                .attr("id", d => d)
+                .attr("viewBox", "0 -5 10 10")
+                .attr("refX", 20)
+                .attr("refY", 0)
+                .attr("markerWidth", 6)
+                .attr("markerHeight", 6)
+                .attr("orient", "auto")
+                .append("path")
+                .attr("d", "M0,-5L10,0L0,5")
+                .attr("fill", d => d === 'arrow-depends-on' ? "#4CAF50" : "#FF9800");
+
+            // Создаем связи
+            const link = svg.append("g")
+                .selectAll("line")
+                .data(data.links)
+                .enter().append("line")
+                .attr("class", "link")
+                .attr("stroke-width", 2)
+                .attr("stroke", d => d.type === 'depends_on' ? "#4CAF50" : "#FF9800")
+                .attr("stroke-opacity", 0.6)
+                .attr("marker-end", d => d.type === 'depends_on' ? "url(#arrow-depends-on)" : "url(#arrow-used-by)");
+
+            // Создаем узлы
+            const node = svg.append("g")
+                .selectAll(".node")
+                .data(data.nodes)
+                .enter().append("g")
+                .attr("class", "node")
+                .on("click", showDDL)
+                .on("dblclick", reloadGraph)
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            node.append("circle")
+                .attr("r", d => d.isCentral ? 25 : Math.max(12, 20 - data.nodes.length * 0.5))
+                .style("fill", d => getNodeColor(d.type))
+                .style("stroke", d => d.isCentral ? "#000" : "#fff")
+                .style("stroke-width", d => d.isCentral ? "3px" : "1.5px");
+
+            node.append("text")
+                .attr("dx", 12)
+                .attr("dy", ".35em")
+                .text(d => d.name)
+                .style("font-size", d => Math.max(8, 14 - data.nodes.length * 0.2) + "px")
+                .style("font-weight", d => d.isCentral ? "bold" : "normal")
+                .style("pointer-events", "none");
+
+            // Обновляем позиции при каждом тике симуляции
+            simulation.on("tick", () => {
+                // Ограничиваем позиции в пределах canvas
+                node.attr("transform", d => {
+                    d.x = Math.max(20, Math.min(width - 20, d.x));
+                    d.y = Math.max(20, Math.min(height - 20, d.y));
+                    return `translate(${d.x},${d.y})`;
+                });
+
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+            });
+
+            // Запускаем симуляцию на более длительное время для больших графов
+            const simulationDuration = Math.min(10000, data.nodes.length * 100);
+            setTimeout(() => {
+                simulation.stop();
+                console.log("Simulation stopped");
+            }, simulationDuration);
+
+            // Создаем легенду
+            createLegend();
+
+            // Сбрасываем позицию легенды при новом графе
+            const legend = document.getElementById('legend');
+            legend.style.left = 'auto';
+            legend.style.top = 'auto';
+            legend.style.right = '10px';
+
+            // Очищаем DDL при новой загрузке графа
+            document.getElementById('ddl-display').value = '';
+
+            console.log("Graph rendering completed");
+        }
+
+        // Получение цвета узла в зависимости от типа объекта
+        function getNodeColor(type) {
+            const colors = {
+                'TABLE': '#4CAF50',
+                'VIEW': '#2196F3',
+                'MATERIALIZED_VIEW': '#9C27B0',
+                'FUNCTION': '#FF9800',
+                'PROCEDURE': '#795548'
+            };
+            return colors[type] || '#607D8B';
+        }
+
+        // Создание легенды
+        function createLegend() {
+            const legendContent = d3.select(".legend-content");
+            legendContent.selectAll("*").remove();
+
+            const types = ['TABLE', 'VIEW', 'MATERIALIZED_VIEW', 'FUNCTION', 'PROCEDURE'];
+            const directions = [
+                { name: '↓ зависит от', color: '#4CAF50' },
+                { name: '↑ используется в', color: '#FF9800' }
+            ];
+
+            // Типы объектов
+            const typeItems = legendContent.selectAll(".type-item")
+                .data(types)
+                .enter().append("div")
+                .attr("class", "legend-item")
+                .style("display", "flex")
+                .style("align-items", "center")
+                .style("margin-bottom", "2px")
+                .style("font-size", "11px");
+
+            typeItems.append("div")
+                .style("width", "8px")
+                .style("height", "8px")
+                .style("border-radius", "50%")
+                .style("background-color", d => getNodeColor(d))
+                .style("margin-right", "5px");
+
+            typeItems.append("span")
+                .text(d => d.toLowerCase());
+
+            // Направления связей
+            const directionItems = legendContent.selectAll(".direction-item")
+                .data(directions)
+                .enter().append("div")
+                .attr("class", "legend-item")
+                .style("display", "flex")
+                .style("align-items", "center")
+                .style("margin-bottom", "2px")
+                .style("font-size", "11px");
+
+            directionItems.append("span")
+                .style("color", d => d.color)
+                .style("font-weight", "bold")
+                .style("margin-right", "3px")
+                .text(d => d.name);
+
+            directionItems.append("span")
+                .text("");
+        }
+
+        // Сворачивание/разворачивание легенды
+        function initLegendToggle() {
+            const legend = document.getElementById('legend');
+            const legendHeader = legend.querySelector('.legend-header');
+
+            legendHeader.addEventListener('click', function(e) {
+                e.stopPropagation();
+                legend.classList.toggle('collapsed');
+            });
+        }
+
+        // Подсветка объектов в DDL
+        function highlightDDLObjects(ddl, nodes) {
+            let highlightedDDL = ddl;
+
+            // Собираем лист имен объектов графа
+            const graphObjectNames = new Set(nodes.map(node => node.name.toLowerCase()));
+
+            // Сначала подсвечиваем оранжевым цветом объекты, которые есть на графе
+            graphObjectNames.forEach(objName => {
+                const regex = new RegExp(`\\b${objName}\\b`, 'gi');
+                highlightedDDL = highlightedDDL.replace(regex, (match) => {
+                    return `<span class="graph-object-highlight" style="background-color: #FF980033; color: #FF9800; font-weight: bold;">${match}</span>`;
+                });
+            });
+
+            // Затем подсвечиваем синим цветом объекты, которые есть в графе, с типами
+            const sortedNodes = [...nodes].sort((a, b) => b.name.length - a.name.length);
+            sortedNodes.forEach(node => {
+                const regex = new RegExp(`<span class="graph-object-highlight"[^>]*>(${node.name})</span>`, 'gi');
+                const replacement = `<span class="highlighted-object" data-schema="${node.schema}" data-name="${node.name}" style="background-color: ${getNodeColor(node.type)}33; color: ${getNodeColor(node.type)}; font-weight: bold;">${node.name}</span>`;
+                highlightedDDL = highlightedDDL.replace(regex, replacement);
+            });
+
+            document.getElementById('ddl-display').innerHTML = highlightedDDL;
+
+            // Добавляем обработчики кликов для подсвеченных объектов
+            document.querySelectorAll('.highlighted-object').forEach(span => {
+                span.addEventListener('click', function() {
+                    const schema = this.getAttribute('data-schema');
+                    const name = this.getAttribute('data-name');
+                    fetch(`/graph/${schema}/${name}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            drawGraph(data);
+                        });
+                });
+            });
+        }
+
+        // Отображение DDL объекта
+        function showDDL(event, d) {
+            event.preventDefault();
+            fetch(`/ddl/${d.schema}/${d.name}`)
+                .then(response => response.text())
+                .then(ddl => {
+                    document.getElementById('ddl-display').value = ddl;
+                    // Используем текущие nodes из глобальной переменной data
+                    if (data && data.nodes) {
+                        highlightDDLObjects(ddl, data.nodes);
+                    }
+                });
+        }
+
+        // Перезагрузка графа с новым корневым объектом
+        function reloadGraph(event, d) {
+            event.preventDefault();
+            tooltip.style("opacity", 0);
+            fetch(`/graph/${d.schema}/${d.name}`)
+                .then(response => response.json())
+                .then(data => {
+                    drawGraph(data);
+                });
+        }
+
+        // Функции для обработки перетаскивания узлов
+        function dragstarted(event) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            event.subject.fx = event.subject.x;
+            event.subject.fy = event.subject.y;
+        }
+
+        function dragged(event) {
+            event.subject.fx = event.x;
+            event.subject.fy = event.y;
+        }
+
+        function dragended(event) {
+            if (!event.active) simulation.alphaTarget(0);
+            event.subject.fx = null;
+            event.subject.fy = null;
+        }
+
+        // Инициализация функций легенды
+        function initLegendFunctions() {
+            initLegendToggle();
+        }
+
+        // Скрытие подсказки при клике вне графа
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('.node') && !event.target.closest('#legend')) {
+                tooltip.style("opacity", 0);
+            }
+        });
+
+        // Инициализация при загрузке страницы
+        window.onload = function() {
+            init();
+            initLegendFunctions();
+        };
+    </script>
+</body>
+</html>
