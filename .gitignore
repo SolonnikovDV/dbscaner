@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.cursor
 
 # C extensions
 *.so
@@ -186,3 +187,12 @@ yarn-error.log*
 .local
 secrets.json
 credentials.json
+data/instances.json
+
+# tig
+tig_app_ru.py
+tig_delta.md
+tig_snapshot.md
+
+# TODO
+TODO.md

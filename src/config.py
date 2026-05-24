@@ -1,11 +1,11 @@
 # Database configuration for PostgreSQL (Production)
 # IMPORTANT: Replace these values with your actual production database credentials
 DB_CONFIG = {
-    'host': 'your_host',          # Database host
-    'port': '5432',               # Database port
-    'database': 'your_db',        # Database name
-    'user': 'your_user',          # Database user
-    'password': 'your_pass'       # Database password
+    'host': 'localhost',
+    'port': '5432',
+    'database': 'postgres',
+    'user': 'gpadmin',
+    'password': 'gpadmin'
 }
 
 # Настройки визуализации графа (Production)

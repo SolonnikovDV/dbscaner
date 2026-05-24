@@ -1,8 +1,13 @@
 #!/bin/bash
 # Запуск веб-приложения Database Object Dependency Graph Scanner
 
-# Добавление текущей директории в PYTHONPATH для корректного импорта модулей
+cd "$(dirname "$0")"
+
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 
-# Запуск веб-приложения через python
-python src/web/app.py
+# Запуск через venv если активирован, иначе через python3
+if [ -n "$VIRTUAL_ENV" ]; then
+    python src/web/app.py
+else
+    python3 src/web/app.py
+fi

@@ -1,515 +1,2873 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <title>Database Dependencies Visualizer - © 2025 Dmitry Solonnikov</title>
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-    <style>
-        .node {
-            cursor: pointer;
-        }
-        .node circle {
-            stroke: #fff;
-            stroke-width: 1.5px;
-        }
-        .link {
-            fill: none;
-            stroke: #999;
-            stroke-opacity: 0.6;
-            stroke-width: 1.5px;
-        }
-        .tooltip {
-            position: absolute;
-            background-color: white;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            pointer-events: none;
-            max-width: 500px;
-            white-space: pre-wrap;
-            font-family: monospace;
-        }
-        #main-container {
-            display: flex;
-            height: calc(100vh - 80px); /* Используем всю доступную высоту экрана минус верхняя панель */
-        }
-        #ddl-container {
-            width: 35%;
-            height: 100%;
-            border: 1px solid #ddd;
-            padding: 10px;
-            overflow-y: auto;
-            background-color: #f9f9f9;
-            resize: horizontal;
-            min-width: 250px;
-            max-width: 70%;
-            display: flex;
-            flex-direction: column;
-        }
-        #ddl-display {
-            width: 100%;
-            flex: 1;
-            font-family: 'Courier New', monospace;
-            white-space: pre-wrap;
-            border: none;
-            background-color: transparent;
-            resize: none;
-            font-size: 12px;
-            line-height: 1.4;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-        }
-        #graph-container {
-            width: 65%;
-            flex: 1; /* Используем flex для равной высоты */
-            border: 1px solid #ddd;
-        }
-        #legend {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background-color: rgba(255, 255, 255, 0.95);
-            padding: 12px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 13px;
-            z-index: 1000;
-            max-width: 220px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            cursor: pointer;
-            user-select: none;
-            transition: all 0.3s ease;
-        }
-        #legend.collapsed {
-            padding: 8px 12px;
-        }
-        #legend.collapsed .legend-content {
-            display: none;
-        }
-        #legend.collapsed .legend-header::after {
-            content: " ▶";
-        }
-        .legend-header {
-            font-weight: bold;
-            margin-bottom: 5px;
-            cursor: pointer;
-        }
-        .legend-header::after {
-            content: " ▼";
-        }
-        .legend-content {
-            display: block;
-        }
-        .controls {
-            margin: 10px;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        .highlighted-object {
-            cursor: pointer;
-            border-radius: 3px;
-            padding: 0 2px;
-            transition: all 0.2s ease;
-        }
-        .highlighted-object:hover {
-            transform: scale(1.05);
-            filter: brightness(1.2);
-        }
-    </style>
+<meta charset="UTF-8">
+<title>DB Graph Explorer</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+<style>
+/* ── Reset & Base ──────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --font:      -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  --bg:         #f5f5f7;
+  --bg-el:      #ffffff;
+  --bg-inset:   #f2f2f7;
+  --bg-hover:   rgba(0,0,0,0.045);
+  --bg-active:  rgba(0,122,255,0.09);
+
+  --sidebar-bg: #2c2c2e;
+  --sidebar-fg: rgba(255,255,255,0.82);
+  --sidebar-fg2: rgba(255,255,255,0.38);
+  --sidebar-sel: rgba(0,122,255,0.85);
+  --sidebar-hover: rgba(255,255,255,0.08);
+  --sidebar-section: rgba(255,255,255,0.28);
+  --sidebar-border: rgba(255,255,255,0.07);
+
+  --text:  #1d1d1f;
+  --text2: #6e6e73;
+  --text3: #aeaeb2;
+
+  --border:  rgba(0,0,0,0.1);
+  --border2: rgba(0,0,0,0.06);
+
+  --accent:       #007AFF;
+  --accent-light: rgba(0,122,255,0.12);
+  --accent-text:  #0051a8;
+
+  --red:    #ff3b30;
+  --orange: #ff9500;
+  --yellow: #ffcc00;
+  --green:  #34c759;
+  --purple: #af52de;
+
+  --impact-direct:     #ff3b30;
+  --impact-transitive: #ff9500;
+  --impact-safe:       rgba(52,199,89,0.6);
+
+  --radius:    8px;
+  --radius-sm: 5px;
+  --radius-lg: 12px;
+
+  --shadow:    0 1px 4px rgba(0,0,0,0.08), 0 0 1px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08);
+}
+
+html, body { height: 100%; overflow: hidden; background: var(--bg); font-family: var(--font); color: var(--text); font-size: 13px; }
+
+/* ── Titlebar ──────────────────────────────────────────────────────────────── */
+#titlebar {
+  height: 44px;
+  background: rgba(245,245,247,0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0;
+  padding: 0 12px;
+  flex-shrink: 0;
+  position: relative; z-index: 100;
+  user-select: none;
+}
+
+.wc { display: flex; gap: 7px; align-items: center; padding-right: 14px; }
+.wc-dot { width: 13px; height: 13px; border-radius: 50%; cursor: default; flex-shrink: 0; }
+.wc-dot.cl { background: #ff5f57; }
+.wc-dot.mn { background: #ffbd2e; }
+.wc-dot.mx { background: #28c940; }
+
+#search-wrap {
+  flex: 1; max-width: 480px; margin: 0 auto;
+  position: relative;
+}
+#search-input {
+  width: 100%; height: 30px;
+  background: rgba(0,0,0,0.055);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px 0 32px;
+  font-family: var(--font); font-size: 13px;
+  color: var(--text); outline: none;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+#search-input::placeholder { color: var(--text3); }
+#search-input:focus {
+  background: var(--bg-el);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+.search-icon {
+  position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  color: var(--text3); font-size: 14px; pointer-events: none;
+}
+#search-kbd {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  font-size: 10px; color: var(--text3);
+  background: var(--bg-inset); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px; pointer-events: none;
+}
+
+.tb-right { display: flex; align-items: center; gap: 8px; margin-left: 12px; }
+.tb-btn {
+  height: 28px; padding: 0 12px;
+  background: var(--bg-el); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-family: var(--font); font-size: 12px;
+  color: var(--text); cursor: pointer; display: flex; align-items: center; gap: 5px;
+  transition: background 0.12s;
+}
+.tb-btn:hover { background: var(--bg-hover); }
+.tb-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tb-btn.primary:hover { background: #0066d6; }
+
+/* ── Search dropdown ───────────────────────────────────────────────────────── */
+#search-drop {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--bg-el);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  max-height: 380px; overflow-y: auto;
+  z-index: 999;
+}
+#search-drop.open { display: block; }
+.sd-section { padding: 6px 0; border-bottom: 1px solid var(--border2); }
+.sd-section:last-child { border-bottom: none; }
+.sd-label { font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.6px; padding: 4px 12px 2px; }
+.sd-item {
+  padding: 7px 12px; display: flex; align-items: center; gap: 9px; cursor: pointer;
+  transition: background 0.1s;
+}
+.sd-item:hover { background: var(--bg-hover); }
+.sd-item.active { background: var(--accent-light); }
+.sd-icon { font-size: 13px; flex-shrink: 0; }
+.sd-name { font-weight: 600; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-sub { font-size: 11px; color: var(--text2); flex-shrink: 0; }
+.sd-badge { font-size: 10px; background: var(--bg-inset); border: 1px solid var(--border); color: var(--text2); border-radius: 4px; padding: 1px 6px; }
+.sd-empty { padding: 20px 12px; text-align: center; color: var(--text3); font-size: 13px; }
+
+/* ── Workspace ─────────────────────────────────────────────────────────────── */
+#workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Sidebar ───────────────────────────────────────────────────────────────── */
+#sidebar {
+  width: 224px; flex-shrink: 0;
+  background: var(--sidebar-bg);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid rgba(0,0,0,0.35);
+}
+
+#sidebar-header {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--sidebar-border);
+  flex-shrink: 0;
+}
+#sidebar-schema-label { font-size: 10px; font-weight: 700; color: var(--sidebar-fg2); text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 6px; }
+#schema-select {
+  width: 100%; background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: var(--radius-sm);
+  color: var(--sidebar-fg); font-family: var(--font); font-size: 12px;
+  padding: 5px 8px; cursor: pointer; outline: none;
+}
+#schema-select option { background: #3a3a3c; }
+
+#sidebar-search-wrap { margin-top: 7px; position: relative; }
+#sidebar-search {
+  width: 100%; background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--radius-sm);
+  color: var(--sidebar-fg); font-family: var(--font); font-size: 12px;
+  padding: 5px 8px 5px 28px; outline: none;
+}
+#sidebar-search::placeholder { color: var(--sidebar-fg2); }
+.ss-icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--sidebar-fg2); font-size: 12px; pointer-events: none; }
+
+#sidebar-body { flex: 1; overflow-y: auto; overflow-x: auto; padding: 4px 0; min-width: 0; }
+#sidebar-body::-webkit-scrollbar { width: 5px; height: 5px; }
+#sidebar-body::-webkit-scrollbar-track { background: transparent; }
+#sidebar-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+
+.sb-group { margin-bottom: 2px; }
+.sb-group-header {
+  font-size: 10px; font-weight: 700; color: var(--sidebar-section);
+  text-transform: uppercase; letter-spacing: 0.6px;
+  padding: 8px 12px 3px;
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none;
+}
+.sb-group-count { font-size: 10px; color: var(--sidebar-fg2); background: rgba(255,255,255,0.1); border-radius: 8px; padding: 0 5px; }
+.sb-item {
+  padding: 5px 10px 5px 14px;
+  display: flex; align-items: center; gap: 7px;
+  cursor: pointer; border-radius: 6px; margin: 1px 6px;
+  color: var(--sidebar-fg);
+  transition: background 0.1s;
+  white-space: nowrap;
+  min-width: max-content;
+}
+.sb-item:hover { background: var(--sidebar-hover); }
+.sb-item.selected { background: var(--sidebar-sel); color: #fff; }
+.sb-item-icon { font-size: 11px; flex-shrink: 0; opacity: 0.7; }
+.sb-item.selected .sb-item-icon { opacity: 1; }
+.sb-item-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.sb-item-badge {
+  font-size: 9px; padding: 1px 5px; border-radius: 8px; flex-shrink: 0;
+  background: rgba(255,59,48,0.8); color: #fff; font-weight: 700;
+  display: none;
+}
+.sb-item.has-impact .sb-item-badge { display: block; }
+
+#sidebar-empty { padding: 24px 12px; text-align: center; color: var(--sidebar-fg2); font-size: 12px; }
+
+/* ── Graph pane ────────────────────────────────────────────────────────────── */
+#graph-pane {
+  flex: 1; position: relative; overflow: hidden;
+  background: var(--bg);
+}
+#graph-svg { width: 100%; height: 100%; display: block; }
+
+/* Evolution node: purple border */
+.g-node.evolution circle {
+  stroke: #af52de !important;
+  stroke-width: 2.5px !important;
+  stroke-dasharray: none !important;
+}
+.g-node.evolution-rename circle {
+  stroke: #ff9500 !important;
+  stroke-width: 3px !important;
+}
+
+/* Service node: dashed border, muted */
+.g-node.service circle {
+  stroke-dasharray: 4 3 !important;
+  opacity: 0.72;
+}
+/* Deep-scan edge: dotted */
+.g-edge.deep-scan {
+  stroke: #8e8e93;
+  stroke-dasharray: 3 4;
+  stroke-width: 1.2px;
+}
+
+/* Graph node impact overlays */
+.g-node circle { cursor: pointer; transition: filter 0.15s; }
+.g-node circle:hover { filter: brightness(1.12) drop-shadow(0 0 4px rgba(0,0,0,0.2)); }
+.g-node.central circle { stroke: #1d1d1f !important; stroke-width: 3px !important; }
+.g-node.impact-direct circle { stroke: var(--impact-direct) !important; stroke-width: 2.5px !important; }
+.g-node.impact-transitive circle { stroke: var(--impact-transitive) !important; stroke-width: 2px !important; }
+.g-node text { pointer-events: none; user-select: none; }
+.g-edge { fill: none; stroke-opacity: 0.7; stroke-width: 1.6px; }
+.g-edge.depends-on { stroke: #34c759; }
+.g-edge.used-by    { stroke: #007AFF; }
+.g-edge.cyclic     { stroke: #ff3b30; stroke-dasharray: 6 3; }
+
+/* Impact badge on node */
+.node-impact-badge {
+  font-size: 9px; font-weight: 800; fill: #fff;
+  pointer-events: none; user-select: none;
+}
+
+/* Tooltip */
+#g-tooltip {
+  position: fixed; z-index: 9999;
+  background: rgba(28,28,30,0.92); color: #f5f5f7;
+  padding: 7px 11px; border-radius: 8px; font-size: 12px;
+  pointer-events: none; opacity: 0; transition: opacity 0.12s;
+  white-space: nowrap; box-shadow: var(--shadow-md);
+}
+
+/* Depth overlay */
+#depth-overlay {
+  position: absolute; top: 12px; left: 12px;
+  background: var(--bg-el); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 10px;
+  box-shadow: var(--shadow); z-index: 50;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  user-select: none;
+}
+.dov-label { font-size: 10px; color: var(--text2); font-weight: 600; }
+.dov-controls { display: flex; align-items: center; gap: 6px; }
+.dov-btn {
+  width: 24px; height: 24px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg-inset);
+  cursor: pointer; font-size: 15px; font-weight: 700; line-height: 1;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+  color: var(--text2); transition: background 0.1s;
+}
+.dov-btn:hover { background: var(--bg-hover); }
+#dov-val { font-size: 16px; font-weight: 800; color: var(--text); min-width: 24px; text-align: center; }
+.dov-reload {
+  border: none; background: none; cursor: pointer; font-size: 17px;
+  color: var(--accent); padding: 0; transition: transform 0.25s;
+}
+.dov-reload:hover { transform: rotate(180deg); }
+
+/* Graph legend */
+#graph-legend {
+  position: absolute; top: 12px; right: 12px;
+  background: var(--bg-el); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 12px;
+  box-shadow: var(--shadow); z-index: 50; font-size: 11px; min-width: 150px;
+}
+.gl-title { font-weight: 700; color: var(--text); margin-bottom: 8px; display: flex; justify-content: space-between; }
+.gl-toggle { cursor: pointer; color: var(--text3); font-size: 10px; }
+.gl-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; color: var(--text2); }
+.gl-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.gl-line { width: 20px; height: 2.5px; border-radius: 2px; flex-shrink: 0; }
+.gl-hint { font-size: 10px; color: var(--text3); margin-top: 7px; line-height: 1.5; }
+
+/* Impact mode banner */
+#impact-banner {
+  display: none;
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(255,59,48,0.9); color: #fff;
+  padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  box-shadow: var(--shadow-md); z-index: 60; cursor: pointer;
+  gap: 8px; align-items: center;
+}
+#impact-banner.visible { display: flex; }
+
+/* ── Inspector ─────────────────────────────────────────────────────────────── */
+#inspector {
+  width: 320px; flex-shrink: 0;
+  background: var(--bg-el);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+#inspector-head {
+  flex-shrink: 0; padding: 10px 12px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-el);
+}
+#inspector-obj {
+  font-size: 13px; font-weight: 700; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-bottom: 8px;
+}
+#inspector-obj-type { font-size: 11px; font-weight: 400; color: var(--text2); }
+
+/* Segmented tab bar */
+#inspector-tabs {
+  display: flex; gap: 0; margin-bottom: -1px;
+}
+.ins-tab {
+  padding: 7px 14px; font-size: 12px; font-weight: 500; color: var(--text2);
+  cursor: pointer; border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.ins-tab:hover { color: var(--text); }
+.ins-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+#inspector-body { flex: 1; overflow-y: auto; }
+
+/* ── Inspector: Info tab ─────────────────────────────────────────────────── */
+.info-section { padding: 12px 14px; border-bottom: 1px solid var(--border2); }
+.info-title { font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.info-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; gap: 8px; }
+.info-key { font-size: 12px; color: var(--text2); flex-shrink: 0; }
+.info-val { font-size: 12px; color: var(--text); font-weight: 500; text-align: right; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.info-desc { font-size: 12px; color: var(--text2); line-height: 1.5; margin-top: 4px; font-style: italic; }
+
+/* ── Inspector: DDL tab ─────────────────────────────────────────────────── */
+#ddl-wrap {
+  display: flex; flex-direction: column; height: 100%;
+}
+#ddl-code {
+  flex: 1; overflow-y: auto; padding: 12px 14px;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word; color: var(--text);
+}
+.obj-link { cursor: pointer; font-weight: 700; border-radius: 3px; padding: 0 2px; transition: filter 0.1s; }
+.obj-link:hover { filter: brightness(0.75); text-decoration: underline; }
+/* DDL-specific: dashed underline, no bold (keeps code readable) */
+.ddl-ref { font-weight: inherit; border-radius: 2px; padding: 0 1px; cursor: pointer; transition: background 0.1s; }
+.ddl-ref:hover { filter: brightness(0.8); border-bottom-style: solid !important; }
+
+/* ── Inspector: Columns tab ─────────────────────────────────────────────── */
+.col-flow { padding: 10px 12px; }
+.col-flow-title { font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.col-flow-item {
+  display: flex; align-items: stretch; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  font-size: 11px;
+}
+.col-flow-src { background: rgba(0,122,255,0.07); padding: 5px 8px; flex: 1; }
+.col-flow-arrow { background: var(--bg-inset); display: flex; align-items: center; padding: 0 6px; color: var(--text3); font-size: 12px; flex-shrink: 0; }
+.col-flow-tgt { background: rgba(52,199,89,0.07); padding: 5px 8px; flex: 1; text-align: right; }
+.col-flow-col { font-weight: 700; color: var(--text); display: block; }
+.col-flow-obj { color: var(--text2); font-size: 10px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-sim-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 5px; font-size: 10px; font-weight: 600;
+  border: 1px solid var(--border); background: var(--bg-inset); cursor: pointer;
+  color: var(--text2); transition: background 0.1s, color 0.1s; margin-top: 4px;
+}
+.col-sim-btn:hover { background: rgba(255,59,48,0.08); color: var(--red); border-color: var(--red); }
+
+/* ── Inspector: Impact tab ─────────────────────────────────────────────── */
+.impact-summary {
+  padding: 12px 14px 8px;
+  display: flex; gap: 8px;
+}
+.impact-stat {
+  flex: 1; text-align: center; padding: 10px 6px;
+  background: var(--bg-inset); border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.impact-stat-num { font-size: 22px; font-weight: 800; }
+.impact-stat-lbl { font-size: 10px; color: var(--text2); margin-top: 2px; }
+.impact-stat.direct .impact-stat-num { color: var(--red); }
+.impact-stat.transitive .impact-stat-num { color: var(--orange); }
+
+.impact-section { padding: 0 14px 10px; }
+.impact-sec-title {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; margin-bottom: 6px; padding: 8px 0 4px;
+  border-bottom: 1px solid var(--border2); display: flex; align-items: center; gap: 6px;
+}
+.impact-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.impact-item {
+  display: flex; align-items: center; gap: 7px; padding: 5px 8px;
+  border-radius: var(--radius-sm); margin-bottom: 2px; cursor: pointer;
+  transition: background 0.1s;
+}
+.impact-item:hover { background: var(--bg-hover); }
+.impact-item-icon { font-size: 11px; }
+.impact-item-name { font-size: 12px; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.impact-item-schema { font-size: 10px; color: var(--text2); }
+.impact-detail { font-size: 10px; color: var(--text2); padding: 0 8px 4px; line-height: 1.4; }
+
+/* Simulate button */
+.simulate-bar {
+  padding: 10px 14px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.sim-col-select {
+  flex: 1; height: 28px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-inset); font-family: var(--font); font-size: 12px;
+  color: var(--text); padding: 0 8px; outline: none;
+}
+.simulate-btn {
+  height: 28px; padding: 0 12px; border-radius: 6px; border: none;
+  background: rgba(255,59,48,0.1); color: var(--red); font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: background 0.12s;
+}
+.simulate-btn:hover { background: rgba(255,59,48,0.18); }
+
+.col-sim-result { padding: 8px 14px; font-size: 11px; }
+
+/* ── Status bar ────────────────────────────────────────────────────────────── */
+#statusbar {
+  height: 32px; flex-shrink: 0;
+  background: rgba(245,245,247,0.9);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 14px;
+  font-size: 11px; color: var(--text2);
+  user-select: none;
+}
+#statusbar .divider { width: 1px; height: 14px; background: var(--border); }
+
+/* Segmented control */
+.seg-ctrl { display: flex; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.seg-opt {
+  padding: 3px 10px; font-size: 11px; font-weight: 500; color: var(--text2);
+  cursor: pointer; transition: background 0.1s, color 0.1s; white-space: nowrap;
+}
+.seg-opt:not(:last-child) { border-right: 1px solid var(--border); }
+.seg-opt.active { background: var(--accent); color: #fff; }
+
+.sb-label { font-size: 11px; color: var(--text2); }
+#sb-obj-info { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.sb-noise { display: flex; align-items: center; gap: 5px; }
+.sb-noise input { accent-color: var(--accent); cursor: pointer; }
+
+/* Depth slider */
+.sb-depth { display: flex; align-items: center; gap: 6px; }
+input[type=range].sb-slider { width: 70px; accent-color: var(--accent); cursor: pointer; }
+#sb-depth-val { min-width: 16px; font-weight: 600; color: var(--text); }
+
+/* ── Loading state ─────────────────────────────────────────────────────────── */
+.spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Pipeline tab ─────────────────────────────────────────────────────────── */
+.pipe-chain {
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 0;
+}
+.pipe-chain-title {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text3); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.pipe-node {
+  display: flex; align-items: stretch; margin-bottom: 0;
+}
+.pipe-connector {
+  width: 20px; display: flex; flex-direction: column;
+  align-items: center; flex-shrink: 0;
+}
+.pipe-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid currentColor; background: var(--bg-el);
+  margin-top: 10px;
+}
+.pipe-line {
+  width: 2px; flex: 1; background: var(--border);
+  margin-left: -1px; min-height: 16px;
+}
+.pipe-card {
+  flex: 1; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 7px 10px; margin: 3px 0 3px 6px; cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+  background: var(--bg-el);
+}
+.pipe-card:hover { background: var(--bg-hover); border-color: var(--accent); }
+.pipe-card.central { border-color: var(--accent); background: var(--accent-light); }
+.pipe-card.upstream-node { border-left: 3px solid var(--blue); }
+.pipe-card.downstream-node { border-left: 3px solid var(--green); }
+.pipe-card-name { font-size: 12px; font-weight: 700; color: var(--text); }
+.pipe-card-meta { font-size: 10px; color: var(--text2); margin-top: 2px; }
+.pipe-card-cols { font-size: 10px; color: var(--text3); margin-top: 4px; }
+
+/* Alias evolution */
+.alias-chain { padding: 8px 12px; border-top: 1px solid var(--border2); }
+.alias-chain-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text3); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.alias-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; padding: 5px 8px; background: var(--bg-inset); border-radius: var(--radius-sm); border: 1px solid var(--border2); }
+.alias-hop { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.alias-col { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--text); background: var(--bg-el); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
+.alias-col.renamed { color: var(--orange); border-color: var(--orange); background: rgba(255,149,0,0.08); }
+.alias-obj { font-size: 9px; color: var(--text3); max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.alias-arrow { color: var(--text3); font-size: 14px; padding: 0 2px; }
+.alias-rename-badge { font-size: 9px; background: var(--orange); color: #fff; border-radius: 8px; padding: 1px 5px; font-weight: 700; }
+
+/* ── Resize handles ────────────────────────────────────────────────────────── */
+.resize-handle {
+  width: 5px; flex-shrink: 0; cursor: col-resize; position: relative;
+  background: var(--border); transition: background 0.15s; z-index: 20;
+}
+.resize-handle::after {
+  content: ''; position: absolute; inset: 0 -3px;
+}
+.resize-handle:hover, .resize-handle.dragging { background: var(--accent); }
+
+/* ── Metadata popup ─────────────────────────────────────────────────────────── */
+#meta-popup {
+  position: fixed; z-index: 9998;
+  background: var(--bg-el); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  padding: 0; min-width: 220px; max-width: 280px;
+  pointer-events: none; opacity: 0; transition: opacity 0.15s;
+  overflow: hidden;
+}
+#meta-popup.visible { opacity: 1; pointer-events: none; }
+.mp-head {
+  padding: 10px 12px 8px;
+  background: var(--bg-inset); border-bottom: 1px solid var(--border2);
+  display: flex; align-items: baseline; gap: 8px;
+}
+.mp-name { font-size: 13px; font-weight: 800; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-body { padding: 8px 12px 10px; }
+.mp-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; gap: 8px; }
+.mp-key { font-size: 11px; color: var(--text2); flex-shrink: 0; }
+.mp-val { font-size: 11px; color: var(--text); font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.mp-loading { padding: 14px 12px; text-align: center; color: var(--text3); font-size: 12px; }
+
+/* ── Utility ───────────────────────────────────────────────────────────────── */
+.empty-state { padding: 32px 16px; text-align: center; color: var(--text3); font-size: 13px; line-height: 1.6; }
+.empty-icon { font-size: 28px; margin-bottom: 8px; }
+.tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 6px; }
+.tag-table { background: rgba(52,199,89,0.12); color: #248942; }
+.tag-view  { background: rgba(0,122,255,0.1); color: var(--accent-text); }
+.tag-mv    { background: rgba(175,82,222,0.1); color: #7b2fa0; }
+.tag-fn    { background: rgba(255,149,0,0.12); color: #a05f00; }
+
+/* ── App shell & nav rail ──────────────────────────────────────────────────── */
+#app-shell { display: flex; height: 100vh; overflow: hidden; }
+#app-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.app-page { display: none; flex: 1; flex-direction: column; overflow: hidden; min-height: 0; }
+.app-page.active { display: flex; }
+
+#nav-rail {
+  width: 148px; flex-shrink: 0;
+  background: #1c1c1e;
+  display: flex; flex-direction: column;
+  padding: 6px; gap: 2px;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  transition: width 0.2s, padding 0.2s, opacity 0.2s;
+  z-index: 200; overflow: hidden;
+}
+#nav-rail.collapsed {
+  width: 0; padding: 0; border: none; opacity: 0; pointer-events: none;
+}
+
+/* Always-visible toggle — stays accessible when nav-rail is collapsed */
+#nav-edge-toggle {
+  width: 28px; flex-shrink: 0; align-self: stretch;
+  background: #1c1c1e;
+  border: none;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.55);
+  cursor: pointer; font-size: 15px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.12s, color 0.12s;
+  z-index: 210;
+}
+#nav-edge-toggle:hover { background: #2c2c2e; color: rgba(255,255,255,0.9); }
+#nav-edge-toggle.open { color: var(--accent); }
+
+.nav-item {
+  width: 100%; height: 36px; border: none; background: transparent;
+  display: flex; align-items: center; gap: 9px;
+  padding: 0 10px; border-radius: 8px; cursor: pointer;
+  color: rgba(255,255,255,0.55);
+  transition: background 0.12s, color 0.12s;
+  text-align: left;
+}
+.nav-item:hover { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.88); }
+.nav-item.active { background: var(--accent); color: #fff; }
+.nav-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; line-height: 1; }
+.nav-label { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-spacer { flex: 1; min-height: 8px; }
+
+/* ── Instance badge (titlebar) ─────────────────────────────────────────────── */
+#instance-badge {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 10px 4px 8px; margin-left: 4px;
+  background: var(--bg-el); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); cursor: pointer;
+  transition: background 0.12s; flex-shrink: 0; max-width: 220px;
+}
+#instance-badge:hover { background: var(--bg-hover); }
+.inst-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+.inst-badge-text { display: flex; flex-direction: column; min-width: 0; }
+#inst-badge-name { font-size: 11px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#inst-badge-host { font-size: 10px; color: var(--text3); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Collapsed sidebar groups ──────────────────────────────────────────────── */
+.sb-group-items { display: none; }
+.sb-group.expanded .sb-group-items { display: block; }
+.sb-group-header .sb-chevron { font-size: 8px; opacity: 0.45; margin-right: 5px; display: inline-block; transition: transform 0.15s; }
+.sb-group.expanded .sb-group-header .sb-chevron { transform: rotate(90deg); }
+
+/* ── Instances page ────────────────────────────────────────────────────────── */
+#page-instances { background: var(--bg); overflow-y: auto; }
+.inst-page-header {
+  padding: 28px 32px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-el);
+}
+.inst-page-header h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.inst-page-header p { font-size: 13px; color: var(--text2); }
+.inst-page-body { padding: 24px 32px 40px; }
+.inst-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px; max-width: 960px;
+}
+.inst-tile {
+  background: var(--bg-el); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 18px 16px;
+  cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s;
+  position: relative; min-height: 130px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.inst-tile:hover { box-shadow: var(--shadow-md); border-color: rgba(0,122,255,0.35); }
+.inst-tile.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
+.inst-tile-add {
+  border-style: dashed; border-color: var(--text3);
+  align-items: center; justify-content: center;
+  color: var(--text3); font-size: 32px; min-height: 130px;
+}
+.inst-tile-add:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.inst-tile-name { font-size: 15px; font-weight: 700; color: var(--text); }
+.inst-tile-label { font-size: 11px; font-family: var(--font-mono); color: var(--text2); }
+.inst-tile-user { font-size: 11px; color: var(--text3); margin-top: auto; }
+.inst-active-badge {
+  position: absolute; top: 10px; right: 10px;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  background: var(--accent-light); color: var(--accent-text);
+  padding: 2px 7px; border-radius: 8px;
+}
+.inst-editor-wrap {
+  max-width: 960px; margin-top: 24px;
+  background: var(--bg-el); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 20px 24px;
+  box-shadow: var(--shadow);
+}
+.inst-editor-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+.inst-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+.inst-field label { display: block; font-size: 11px; font-weight: 600; color: var(--text2); margin-bottom: 4px; }
+.inst-field input {
+  width: 100%; padding: 7px 10px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-family: var(--font); font-size: 13px;
+  background: var(--bg-inset); outline: none;
+}
+.inst-field input:focus { box-shadow: 0 0 0 3px var(--accent-light); background: var(--bg-el); }
+.inst-field.full { grid-column: 1 / -1; }
+.inst-actions { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; align-items: center; }
+.inst-msg { font-size: 12px; margin-top: 10px; }
+.inst-msg.ok { color: var(--green); }
+.inst-msg.err { color: var(--red); }
+
+/* ── About page ────────────────────────────────────────────────────────────── */
+#page-about { background: var(--bg); overflow-y: auto; }
+.about-page-body { padding: 24px 32px 48px; max-width: 820px; }
+.about-hero {
+  background: var(--bg-el); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 24px 28px; margin-bottom: 20px;
+  box-shadow: var(--shadow);
+}
+.about-hero h2 { font-size: 20px; font-weight: 800; margin-bottom: 6px; }
+.about-tagline { font-size: 13px; color: var(--text2); margin-bottom: 12px; }
+.about-desc { font-size: 13px; line-height: 1.65; color: var(--text); }
+.about-section {
+  background: var(--bg-el); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 18px 22px; margin-bottom: 16px;
+}
+.about-section h3 {
+  font-size: 13px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text3); margin-bottom: 12px;
+}
+.about-features { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.about-features li {
+  font-size: 13px; color: var(--text); padding-left: 16px; position: relative; line-height: 1.5;
+}
+.about-features li::before {
+  content: '•'; position: absolute; left: 0; color: var(--accent); font-weight: 700;
+}
+.about-author-card {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.about-author-name { font-size: 16px; font-weight: 700; }
+.about-author-copy { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.about-tg-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: var(--radius-sm);
+  background: #0088cc; color: #fff; text-decoration: none;
+  font-size: 13px; font-weight: 600; transition: opacity 0.12s;
+}
+.about-tg-link:hover { opacity: 0.85; }
+.about-license {
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.55;
+  color: var(--text2); background: var(--bg-inset);
+  border: 1px solid var(--border2); border-radius: var(--radius-sm);
+  padding: 14px 16px; white-space: pre-wrap; max-height: 320px; overflow-y: auto;
+}
+.about-license-badge {
+  display: inline-block; font-size: 11px; font-weight: 700;
+  background: var(--accent-light); color: var(--accent-text);
+  padding: 3px 10px; border-radius: 8px; margin-bottom: 10px;
+}
+</style>
 </head>
 <body>
-    <div class="controls">
-        <label>Schema: </label>
-        <select id="schema-select"></select>
-        <label>Object: </label>
-        <select id="object-select"></select>
-        <button onclick="loadGraph()">Load Graph</button>
+
+<div id="app-shell">
+  <!-- Persistent nav toggle (always visible, even when rail collapsed) -->
+  <button id="nav-edge-toggle" class="open" onclick="toggleNavRail()" title="Hide navigation">☰</button>
+
+  <!-- Nav rail -->
+  <nav id="nav-rail">
+    <button class="nav-item active" id="nav-graph" onclick="navigateToPage('graph')" title="Dependency Graph">
+      <span class="nav-icon">◈</span><span class="nav-label">Graph</span>
+    </button>
+    <button class="nav-item" id="nav-instances" onclick="navigateToPage('instances')" title="Database Instances">
+      <span class="nav-icon">🗄</span><span class="nav-label">Instances</span>
+    </button>
+    <div class="nav-spacer"></div>
+    <button class="nav-item" id="nav-about" onclick="navigateToPage('about')" title="About">
+      <span class="nav-icon">ℹ</span><span class="nav-label">About</span>
+    </button>
+  </nav>
+
+  <div id="app-main">
+
+<!-- ── Graph page ───────────────────────────────────────────────────────────── -->
+<div id="page-graph" class="app-page active">
+
+<!-- ── Titlebar ─────────────────────────────────────────────────────────────── -->
+<div id="titlebar">
+  <div class="wc">
+    <div class="wc-dot cl"></div>
+    <div class="wc-dot mn"></div>
+    <div class="wc-dot mx"></div>
+  </div>
+
+  <div id="instance-badge" onclick="navigateToPage('instances')" title="Active database instance — click to manage">
+    <span class="inst-dot"></span>
+    <div class="inst-badge-text">
+      <span id="inst-badge-name">…</span>
+      <span id="inst-badge-host">…</span>
     </div>
-    <div id="legend">
-        <div class="legend-header">Легенда</div>
-        <div class="legend-content"></div>
+  </div>
+
+  <div id="search-wrap">
+    <span class="search-icon">⌕</span>
+    <input id="search-input" type="text" placeholder="Search tables, views, columns… (⌘K)" autocomplete="off">
+    <span id="search-kbd">⌘K</span>
+    <div id="search-drop"></div>
+  </div>
+
+  <div class="tb-right">
+    <button class="tb-btn" onclick="exportJSON()" title="Export JSON">⬇ JSON</button>
+    <button class="tb-btn" onclick="exportPNG()"  title="Export PNG">⬇ PNG</button>
+    <button class="tb-btn primary" id="load-btn" onclick="loadGraph()">Load Graph</button>
+  </div>
+</div>
+
+<!-- ── Workspace ────────────────────────────────────────────────────────────── -->
+<div id="workspace">
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div id="sidebar-header">
+      <div id="sidebar-schema-label">Schema</div>
+      <select id="schema-select" onchange="onSchemaChange(this.value)"></select>
+      <div id="sidebar-search-wrap">
+        <span class="ss-icon">⌕</span>
+        <input id="sidebar-search" type="text" placeholder="Filter objects…" oninput="filterSidebar(this.value)" autocomplete="off">
+      </div>
     </div>
-    <div id="main-container">
-        <div id="ddl-container">
-            <h3>DDL</h3>
-            <textarea id="ddl-display" readonly></textarea>
+    <div id="sidebar-body">
+      <div class="empty-state"><div class="empty-icon">🗄</div>Select a schema</div>
+    </div>
+  </aside>
+
+  <div class="resize-handle" id="left-resize"></div>
+
+  <!-- Graph -->
+  <main id="graph-pane">
+    <svg id="graph-svg"></svg>
+
+    <!-- No connections banner -->
+    <div id="no-conn-banner" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(28,28,30,0.88);color:#f5f5f7;padding:8px 18px;border-radius:20px;font-size:12px;z-index:60;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.18);text-align:center;max-width:80%"></div>
+
+    <!-- Impact mode banner -->
+    <div id="impact-banner" onclick="clearImpactMode()">
+      🔴 Impact mode active — <span id="impact-banner-text"></span> &nbsp;✕ clear
+    </div>
+
+    <!-- Depth overlay -->
+    <div id="depth-overlay">
+      <div class="dov-label">Depth</div>
+      <div class="dov-controls">
+        <button class="dov-btn" onclick="adjustDepth(-1)">−</button>
+        <span id="dov-val">10</span>
+        <button class="dov-btn" onclick="adjustDepth(+1)">+</button>
+      </div>
+      <button class="dov-reload" onclick="reloadCurrentGraph()" title="Reload">↻</button>
+    </div>
+
+    <!-- Attribute evolution panel (slides up from bottom) -->
+    <div id="attr-panel" style="display:none;position:absolute;bottom:0;left:0;right:0;
+         max-height:50%;background:#fff;border-top:2px solid var(--border);
+         flex-direction:column;z-index:150;box-shadow:0 -4px 16px rgba(0,0,0,0.10)">
+      <div id="attr-header" style="flex-shrink:0;display:flex;align-items:center;gap:10px;
+           padding:7px 14px;background:#1a1a2e;color:#eee;font-size:12px">
+        <span id="attr-title" style="font-weight:700;flex:1">Attribute lineage</span>
+        <span onclick="closeAttrPanel()"
+              style="cursor:pointer;color:#aaa;font-size:16px;line-height:1;padding:0 4px">✕</span>
+      </div>
+      <div id="attr-body" style="flex:1;overflow:auto"></div>
+    </div>
+
+    <!-- Legend -->
+    <div id="graph-legend">
+      <div class="gl-title">Legend <span class="gl-toggle" onclick="toggleLegend(this)">▼</span></div>
+      <div id="gl-body">
+        <div class="gl-row"><div class="gl-dot" style="background:#34c759"></div>Table</div>
+        <div class="gl-row"><div class="gl-dot" style="background:#007AFF"></div>View</div>
+        <div class="gl-row"><div class="gl-dot" style="background:#af52de"></div>Mat. View</div>
+        <div class="gl-row"><div class="gl-dot" style="background:#ff9500"></div>Function</div>
+        <div style="margin:6px 0 3px; border-top:1px solid var(--border2)"></div>
+        <div class="gl-row"><div class="gl-line" style="background:#34c759"></div>depends on →</div>
+        <div class="gl-row"><div class="gl-line" style="background:#007AFF"></div>← used by</div>
+        <div class="gl-row"><div class="gl-line" style="background:repeating-linear-gradient(90deg,#ff3b30 0,#ff3b30 5px,transparent 5px,transparent 8px)"></div>cycle</div>
+        <div class="gl-row"><div class="gl-line" style="background:repeating-linear-gradient(90deg,#8e8e93 0,#8e8e93 3px,transparent 3px,transparent 7px)"></div>deep scan</div>
+        <div style="margin:6px 0 3px; border-top:1px solid var(--border2)"></div>
+        <div class="gl-row"><div class="gl-dot" style="background:transparent;border:2px dashed #8e8e93"></div>service node</div>
+                        <div class="gl-row"><div class="gl-dot" style="background:transparent;border:2.5px solid #af52de"></div>in evolution path</div>
+                        <div class="gl-row"><div class="gl-dot" style="background:transparent;border:3px solid #ff9500"></div>rename point ⇒</div>
+        <div class="gl-row"><div class="gl-dot" style="background:transparent;border:2px solid #ff3b30"></div>direct impact</div>
+        <div class="gl-row"><div class="gl-dot" style="background:transparent;border:2px solid #ff9500"></div>transitive</div>
+        <div class="gl-hint">Click → inspect &nbsp;|&nbsp; Dbl-click → focus<br>Scroll → zoom &nbsp;|&nbsp; Drag → pan</div>
+      </div>
+    </div>
+  </main>
+
+  <div class="resize-handle" id="right-resize"></div>
+
+  <!-- Inspector -->
+  <aside id="inspector">
+    <div id="inspector-head">
+      <div id="inspector-obj"><span style="color:var(--text3)">No object selected</span></div>
+      <div id="inspector-tabs">
+        <div class="ins-tab active" data-tab="info"     onclick="switchTab('info')">Info</div>
+        <div class="ins-tab"        data-tab="ddl"      onclick="switchTab('ddl')">DDL</div>
+        <div class="ins-tab"        data-tab="columns"  onclick="switchTab('columns')">Columns</div>
+        <div class="ins-tab"        data-tab="pipeline" onclick="switchTab('pipeline')">Pipeline</div>
+        <div class="ins-tab"        data-tab="impact"   onclick="switchTab('impact')">Impact</div>
+      </div>
+    </div>
+    <div id="inspector-body">
+      <div class="empty-state" style="padding-top:48px">
+        <div class="empty-icon">👆</div>
+        Click a node in the graph<br>or select an object from the sidebar
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- ── Status bar ────────────────────────────────────────────────────────────── -->
+<div id="statusbar">
+  <span id="sb-obj-info">No object selected</span>
+  <div class="divider"></div>
+
+  <span class="sb-label">Direction:</span>
+  <div class="seg-ctrl">
+    <div class="seg-opt active" data-dir="both"       onclick="setDirection(this)">Both</div>
+    <div class="seg-opt"        data-dir="downstream" onclick="setDirection(this)">↓ Downstream</div>
+    <div class="seg-opt"        data-dir="upstream"   onclick="setDirection(this)">↑ Upstream</div>
+  </div>
+
+  <div class="divider"></div>
+  <div class="sb-depth">
+    <span class="sb-label">Depth:</span>
+    <input type="range" class="sb-slider" id="sb-depth-slider" min="1" max="20" value="10"
+           oninput="onDepthSlider(this.value)">
+    <span id="sb-depth-val">10</span>
+  </div>
+
+  <div class="divider"></div>
+  <div class="sb-noise" title="Hides objects matching noise patterns: _log, _audit, _history, _archive, _tmp and similar. Reload the graph after changing.">
+    <input type="checkbox" id="sb-noise" onchange="reloadCurrentGraph()">
+    <label for="sb-noise" style="cursor:pointer">Hide noise</label>
+    <span style="color:var(--text3);font-size:10px" title="Filters: _log, _audit, _history, _archive, _tmp, _temp">ⓘ</span>
+  </div>
+
+  <div class="divider"></div>
+  <div class="sb-noise" title="Cross-schema full-text scan of all function bodies. Slower but finds functions in other schemas that reference this object.">
+    <input type="checkbox" id="sb-deep-scan" onchange="reloadCurrentGraph()">
+    <label for="sb-deep-scan" style="cursor:pointer">Deep Scan</label>
+    <span style="color:var(--text3);font-size:10px" title="Searches ALL schemas for upstream function references. May be slow on large databases.">⚡</span>
+  </div>
+
+  <div style="flex:1"></div>
+  <span id="sb-stats" style="color:var(--text3)"></span>
+</div>
+
+</div><!-- /page-graph -->
+
+<!-- ── Instances page ───────────────────────────────────────────────────────── -->
+<div id="page-instances" class="app-page">
+  <div class="inst-page-header">
+    <h1>Database Instances</h1>
+    <p>Manage connection profiles and switch the active database instance.</p>
+  </div>
+  <div class="inst-page-body">
+    <div class="inst-grid" id="inst-grid"></div>
+    <div id="inst-editor-wrap" class="inst-editor-wrap" style="display:none">
+      <div class="inst-editor-title" id="inst-editor-title">Edit Instance</div>
+      <div class="inst-form-grid">
+        <div class="inst-field full">
+          <label>Display name</label>
+          <input id="inst-f-name" type="text" placeholder="My Greenplum cluster">
         </div>
-        <div id="graph-container"></div>
+        <div class="inst-field">
+          <label>Host</label>
+          <input id="inst-f-host" type="text" placeholder="localhost">
+        </div>
+        <div class="inst-field">
+          <label>Port</label>
+          <input id="inst-f-port" type="text" placeholder="5432">
+        </div>
+        <div class="inst-field">
+          <label>Database</label>
+          <input id="inst-f-database" type="text" placeholder="postgres">
+        </div>
+        <div class="inst-field">
+          <label>User</label>
+          <input id="inst-f-user" type="text" placeholder="gpadmin">
+        </div>
+        <div class="inst-field">
+          <label>Password</label>
+          <input id="inst-f-password" type="password" placeholder="••••••••">
+        </div>
+      </div>
+      <div class="inst-actions">
+        <button class="tb-btn primary" onclick="saveInstance()">Save</button>
+        <button class="tb-btn" onclick="testInstanceConnection()">Test connection</button>
+        <button class="tb-btn" id="inst-btn-activate" onclick="activateEditedInstance()">Set as active</button>
+        <button class="tb-btn" id="inst-btn-delete" onclick="deleteEditedInstance()" style="color:var(--red)">Delete</button>
+        <button class="tb-btn" onclick="closeInstanceEditor()">Cancel</button>
+      </div>
+      <div id="inst-msg" class="inst-msg"></div>
     </div>
+  </div>
+</div>
 
-    <script>
-        let svg;
-        let simulation;
-        let tooltip;
-        let data; // Глобальная переменная для хранения данных графа
-        let isDraggingLegend = false;
-        let legendOffsetX = 0;
-        let legendOffsetY = 0;
+<!-- ── About page ───────────────────────────────────────────────────────────── -->
+<div id="page-about" class="app-page">
+  <div class="inst-page-header">
+    <h1>About</h1>
+    <p>Application info, license and author contacts.</p>
+  </div>
+  <div class="about-page-body" id="about-content">
+    <div class="empty-state"><span class="spinner"></span> Loading…</div>
+  </div>
+</div>
 
-        // Инициализация
-        function init() {
-            svg = d3.select("#graph-container")
-                .append("svg")
-                .attr("width", "100%")
-                .attr("height", "100%");
+  </div><!-- /app-main -->
+</div><!-- /app-shell -->
 
-            tooltip = d3.select("body")
-                .append("div")
-                .attr("class", "tooltip")
-                .style("opacity", 0);
+<!-- ── Global overlays ──────────────────────────────────────────────────────── -->
+<div id="g-tooltip"></div>
 
-            // Загрузка списка схем
-            fetch('/schemas')
-                .then(response => response.json())
-                .then(schemas => {
-                    const schemaSelect = document.getElementById('schema-select');
-                    schemas.forEach(schema => {
-                        const option = document.createElement('option');
-                        option.value = schema;
-                        option.textContent = schema;
-                        schemaSelect.appendChild(option);
-                    });
-                    loadObjects(schemaSelect.value);
-                });
+<!-- Metadata popup -->
+<div id="meta-popup">
+  <div class="mp-head">
+    <span class="mp-name" id="mp-name">…</span>
+    <span id="mp-type-tag"></span>
+  </div>
+  <div class="mp-body" id="mp-body">
+    <div class="mp-loading"><span class="spinner"></span></div>
+  </div>
+</div>
 
-            // Обработчик изменения схемы
-            document.getElementById('schema-select').addEventListener('change', (e) => {
-                loadObjects(e.target.value);
-            });
+<script>
+// ════════════════════════════════════════════════════════
+// Constants
+// ════════════════════════════════════════════════════════
+const NODE_COLORS = {
+  TABLE: '#34c759', VIEW: '#007AFF', MATERIALIZED_VIEW: '#af52de',
+  FUNCTION: '#ff9500', PROCEDURE: '#795548', TRIGGER: '#ff3b30',
+};
+const TYPE_ICONS = {
+  TABLE:'□', VIEW:'◈', MATERIALIZED_VIEW:'◆', FUNCTION:'ƒ',
+  PROCEDURE:'ƒ', TRIGGER:'⚡',
+};
+const NODE_R = 18, CENTRAL_R = 26;
+function nc(t) { return NODE_COLORS[t] || '#8e8e93'; }
+function ti(t) { return TYPE_ICONS[t] || '○'; }
+
+// ════════════════════════════════════════════════════════
+// State
+// ════════════════════════════════════════════════════════
+const S = {
+  page: 'graph',
+  navCollapsed: false,
+  instances: [],
+  activeInstanceId: null,
+  editingInstanceId: null,
+  schemas: [], currentSchema: null,
+  allObjects: [],
+  currentObject: null,
+  graphData: null,
+  impactData: null,
+  impactMode: false,
+  impactColumn: null,
+  selectedNode: null,
+  tab: 'info',
+  direction: 'both',
+  depth: 10,
+  noise: false,
+  metaCache: {},
+  colCache: {},
+  evolutionTrace: null,      // {path:[...], renames:[...], col} for main graph markers
+  pendingDDLHighlight: null, // {col, aliasOf} — applied after DDL renders
+};
+
+// ════════════════════════════════════════════════════════
+// Init
+// ════════════════════════════════════════════════════════
+window.addEventListener('load', () => {
+  loadActiveInstance().then(() => loadSchemas());
+
+  // Global search ⌘K
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      document.getElementById('search-input').focus();
+      document.getElementById('search-input').select();
+    }
+    if (e.key === 'Escape') closeSearch();
+  });
+
+  document.getElementById('search-input').addEventListener('input', debounce(onGlobalSearch, 220));
+  document.getElementById('search-input').addEventListener('focus', () => {
+    if (document.getElementById('search-drop').children.length)
+      document.getElementById('search-drop').classList.add('open');
+  });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#search-wrap')) closeSearch();
+  });
+});
+
+function loadSchemas() {
+  return fetch('/schemas')
+    .then(r => r.json())
+    .then(schemas => {
+      S.schemas = schemas;
+      const sel = document.getElementById('schema-select');
+      sel.innerHTML = '';
+      schemas.forEach(s => sel.append(new Option(s, s)));
+      if (schemas.length) onSchemaChange(schemas[0]);
+      else {
+        S.allObjects = [];
+        renderSidebar([]);
+        showGraphMsg('No schemas found on this instance.');
+      }
+    })
+    .catch(() => showGraphMsg('Cannot connect to the database. Check instance settings.'));
+}
+
+function onSchemaChange(schema) {
+  S.currentSchema = schema;
+  document.getElementById('sidebar-search').value = '';
+  fetch(`/objects/${schema}`)
+    .then(r => r.json())
+    .then(objs => {
+      S.allObjects = objs;
+      renderSidebar(objs);
+    });
+}
+
+// ════════════════════════════════════════════════════════
+// Sidebar rendering
+// ════════════════════════════════════════════════════════
+function filterSidebar(q) {
+  const filtered = q
+    ? S.allObjects.filter(o => o.name.toLowerCase().includes(q.toLowerCase()))
+    : S.allObjects;
+  renderSidebar(filtered);
+}
+
+function renderSidebar(objects) {
+  const body = document.getElementById('sidebar-body');
+  if (!objects.length) {
+    body.innerHTML = '<div id="sidebar-empty" style="color:var(--sidebar-fg2);padding:20px 12px;text-align:center;font-size:12px">No objects found</div>';
+    return;
+  }
+
+  const isFiltering = objects.length !== S.allObjects.length;
+  const groups = {};
+  objects.forEach(o => {
+    const g = o.type || 'OTHER';
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(o);
+  });
+
+  const order = ['TABLE','VIEW','MATERIALIZED_VIEW','FUNCTION','PROCEDURE','TRIGGER','FOREIGN_TABLE','PARTITIONED_TABLE','OTHER'];
+  let html = '';
+  order.forEach(type => {
+    if (!groups[type]) return;
+    const expanded = isFiltering ? ' expanded' : '';
+    html += `<div class="sb-group${expanded}">
+      <div class="sb-group-header" onclick="toggleGroup(this)">
+        <span><span class="sb-chevron">▶</span>${type.replace('_',' ')}</span>
+        <span class="sb-group-count">${groups[type].length}</span>
+      </div>
+      <div class="sb-group-items">`;
+    groups[type].forEach(o => {
+      const sel = S.currentObject === o.name ? ' selected' : '';
+      html += `<div class="sb-item${sel}" data-name="${o.name}" data-type="${o.type}"
+        onclick="selectObject('${esc(S.currentSchema)}','${esc(o.name)}')"
+        onmouseenter="showMetaPopup(event,'${esc(S.currentSchema)}','${esc(o.name)}')"
+        onmouseleave="hideMetaPopup()">
+        <span class="sb-item-icon">${ti(o.type)}</span>
+        <span class="sb-item-name">${o.name}</span>
+        <span class="sb-item-badge" id="badge-${esc(o.name)}"></span>
+      </div>`;
+    });
+    html += '</div></div>';
+  });
+  body.innerHTML = html;
+}
+
+function toggleGroup(el) {
+  el.parentElement.classList.toggle('expanded');
+}
+
+// ════════════════════════════════════════════════════════
+// Navigation & instances
+// ════════════════════════════════════════════════════════
+function toggleNavRail() {
+  S.navCollapsed = !S.navCollapsed;
+  document.getElementById('nav-rail').classList.toggle('collapsed', S.navCollapsed);
+  document.getElementById('nav-edge-toggle').classList.toggle('open', !S.navCollapsed);
+  document.getElementById('nav-edge-toggle').title =
+    S.navCollapsed ? 'Show navigation' : 'Hide navigation';
+}
+
+function navigateToPage(page) {
+  S.page = page;
+  document.querySelectorAll('.app-page').forEach(el => el.classList.remove('active'));
+  document.getElementById(`page-${page}`).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const navBtn = document.getElementById(`nav-${page}`);
+  if (navBtn) navBtn.classList.add('active');
+  if (page === 'instances') loadInstancesPage();
+  if (page === 'about') loadAboutPage();
+}
+
+function loadAboutPage() {
+  fetch('/api/about')
+    .then(r => r.json())
+    .then(data => {
+      const feats = (data.features || [])
+        .map(f => `<li>${esc(f)}</li>`).join('');
+      document.getElementById('about-content').innerHTML = `
+        <div class="about-hero">
+          <h2>${esc(data.name)}</h2>
+          <div class="about-tagline">${esc(data.tagline)}</div>
+          <div class="about-desc">${esc(data.description)}</div>
+        </div>
+
+        <div class="about-section">
+          <h3>Features</h3>
+          <ul class="about-features">${feats}</ul>
+        </div>
+
+        <div class="about-section">
+          <h3>Author</h3>
+          <div class="about-author-card">
+            <div>
+              <div class="about-author-name">${esc(data.author)}</div>
+              <div class="about-author-copy">${esc(data.copyright)}</div>
+            </div>
+            <a class="about-tg-link" href="${esc(data.telegram)}" target="_blank" rel="noopener">
+              ✈ ${esc(data.telegram_handle)}
+            </a>
+          </div>
+        </div>
+
+        <div class="about-section">
+          <h3>License</h3>
+          <span class="about-license-badge">${esc(data.license_name)}</span>
+          <div class="about-license">${esc(data.license_text || '')}</div>
+        </div>`;
+    })
+    .catch(() => {
+      document.getElementById('about-content').innerHTML =
+        '<div class="empty-state">Failed to load about info.</div>';
+    });
+}
+
+function updateInstanceBadge(inst) {
+  if (!inst) return;
+  document.getElementById('inst-badge-name').textContent = inst.name || 'Instance';
+  document.getElementById('inst-badge-host').textContent = inst.label || `${inst.host}:${inst.port}/${inst.database}`;
+}
+
+function loadActiveInstance() {
+  return fetch('/api/instances/active')
+    .then(r => r.json())
+    .then(inst => {
+      S.activeInstanceId = inst.id;
+      updateInstanceBadge(inst);
+    })
+    .catch(() => {
+      document.getElementById('inst-badge-name').textContent = 'Not connected';
+      document.getElementById('inst-badge-host').textContent = 'Configure instance';
+    });
+}
+
+function loadInstancesPage() {
+  fetch('/api/instances')
+    .then(r => r.json())
+    .then(data => {
+      S.instances = data.instances || [];
+      S.activeInstanceId = data.active_id;
+      renderInstanceTiles();
+    });
+}
+
+function renderInstanceTiles() {
+  const grid = document.getElementById('inst-grid');
+  let html = '';
+  S.instances.forEach(inst => {
+    const active = inst.id === S.activeInstanceId;
+    html += `<div class="inst-tile${active ? ' active' : ''}" onclick="openInstanceEditor('${inst.id}')">
+      ${active ? '<span class="inst-active-badge">Active</span>' : ''}
+      <div class="inst-tile-name">${esc(inst.name)}</div>
+      <div class="inst-tile-label">${esc(inst.label)}</div>
+      <div class="inst-tile-user">${esc(inst.user)}</div>
+    </div>`;
+  });
+  html += `<div class="inst-tile inst-tile-add" onclick="openNewInstanceEditor()" title="Add instance">+</div>`;
+  grid.innerHTML = html;
+}
+
+function openNewInstanceEditor() {
+  S.editingInstanceId = null;
+  document.getElementById('inst-editor-title').textContent = 'New Instance';
+  document.getElementById('inst-f-name').value = '';
+  document.getElementById('inst-f-host').value = 'localhost';
+  document.getElementById('inst-f-port').value = '5432';
+  document.getElementById('inst-f-database').value = 'postgres';
+  document.getElementById('inst-f-user').value = '';
+  document.getElementById('inst-f-password').value = '';
+  document.getElementById('inst-btn-delete').style.display = 'none';
+  document.getElementById('inst-btn-activate').style.display = 'none';
+  document.getElementById('inst-msg').textContent = '';
+  document.getElementById('inst-editor-wrap').style.display = '';
+}
+
+function openInstanceEditor(id) {
+  const inst = S.instances.find(i => i.id === id);
+  if (!inst) return;
+  S.editingInstanceId = id;
+  document.getElementById('inst-editor-title').textContent = 'Edit Instance';
+  document.getElementById('inst-f-name').value = inst.name || '';
+  document.getElementById('inst-f-host').value = inst.host || '';
+  document.getElementById('inst-f-port').value = inst.port || '5432';
+  document.getElementById('inst-f-database').value = inst.database || '';
+  document.getElementById('inst-f-user').value = inst.user || '';
+  document.getElementById('inst-f-password').value = '';
+  document.getElementById('inst-btn-delete').style.display = S.instances.length > 1 ? '' : 'none';
+  document.getElementById('inst-btn-activate').style.display = inst.id === S.activeInstanceId ? 'none' : '';
+  document.getElementById('inst-msg').textContent = '';
+  document.getElementById('inst-editor-wrap').style.display = '';
+}
+
+function closeInstanceEditor() {
+  document.getElementById('inst-editor-wrap').style.display = 'none';
+  S.editingInstanceId = null;
+}
+
+function collectInstanceForm() {
+  return {
+    name: document.getElementById('inst-f-name').value.trim(),
+    host: document.getElementById('inst-f-host').value.trim(),
+    port: document.getElementById('inst-f-port').value.trim() || '5432',
+    database: document.getElementById('inst-f-database').value.trim(),
+    user: document.getElementById('inst-f-user').value.trim(),
+    password: document.getElementById('inst-f-password').value,
+  };
+}
+
+function showInstMsg(text, ok) {
+  const el = document.getElementById('inst-msg');
+  el.textContent = text;
+  el.className = 'inst-msg ' + (ok ? 'ok' : 'err');
+}
+
+function testInstanceConnection() {
+  const data = collectInstanceForm();
+  showInstMsg('Testing…', true);
+  fetch('/api/instances/test', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data),
+  })
+    .then(r => r.json())
+    .then(res => showInstMsg(res.ok ? 'Connection successful' : (res.error || 'Connection failed'), res.ok))
+    .catch(e => showInstMsg(e.message, false));
+}
+
+function saveInstance() {
+  const data = collectInstanceForm();
+  const isNew = !S.editingInstanceId;
+  const url = isNew ? '/api/instances' : `/api/instances/${S.editingInstanceId}`;
+  const method = isNew ? 'POST' : 'PUT';
+  if (isNew) data.set_active = S.instances.length === 0;
+
+  fetch(url, { method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) })
+    .then(r => r.json().then(j => ({ ok: r.ok, j })))
+    .then(({ ok, j }) => {
+      if (!ok) { showInstMsg(j.error || 'Save failed', false); return; }
+      showInstMsg('Saved', true);
+      S.editingInstanceId = j.id;
+      return refreshAfterInstanceChange(j);
+    });
+}
+
+function activateEditedInstance() {
+  if (!S.editingInstanceId) return;
+  fetch(`/api/instances/${S.editingInstanceId}/activate`, { method: 'POST' })
+    .then(r => r.json())
+    .then(inst => refreshAfterInstanceChange(inst));
+}
+
+function deleteEditedInstance() {
+  if (!S.editingInstanceId || S.instances.length <= 1) return;
+  if (!confirm('Delete this instance?')) return;
+  fetch(`/api/instances/${S.editingInstanceId}`, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(() => {
+      closeInstanceEditor();
+      return loadInstancesPage().then(() => loadActiveInstance().then(() => loadSchemas()));
+    });
+}
+
+function refreshAfterInstanceChange(inst) {
+  S.activeInstanceId = inst.id;
+  updateInstanceBadge(inst);
+  S.currentObject = null;
+  S.graphData = null;
+  S.allObjects = [];
+  document.getElementById('sidebar-body').innerHTML = '<div class="empty-state"><div class="empty-icon">🗄</div>Reloading…</div>';
+  return loadInstancesPage().then(() => loadSchemas());
+}
+
+function selectObject(schema, name) {
+  S.currentSchema = schema;
+  S.currentObject = name;
+  document.getElementById('sb-obj-info').textContent = `${schema}.${name}`;
+  // Update sidebar selection
+  document.querySelectorAll('.sb-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.name === name);
+  });
+  loadGraph();
+}
+
+// ════════════════════════════════════════════════════════
+// Graph loading
+// ════════════════════════════════════════════════════════
+function loadGraph() {
+  const schema = S.currentSchema || document.getElementById('schema-select').value;
+  const obj    = S.currentObject || (S.allObjects[0] && S.allObjects[0].name);
+  if (!schema || !obj) return;
+  S.currentSchema = schema;
+  S.currentObject = obj;
+  fetchAndDrawGraph(schema, obj);
+}
+
+function fetchAndDrawGraph(schema, name) {
+  clearImpactMode(false);
+  const btn = document.getElementById('load-btn');
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  S.noise     = document.getElementById('sb-noise')?.checked     || false;
+  S.deepScan  = document.getElementById('sb-deep-scan')?.checked || false;
+  const url = `/graph/${schema}/${name}?direction=${S.direction}&exclude_noise=${S.noise}&max_depth=${S.depth}&deep_scan=${S.deepScan}`;
+  fetch(url)
+    .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.error || `HTTP ${r.status}`); }))
+    .then(data => {
+      S.graphData = data;
+      btn.textContent = 'Load Graph';
+        const nonCentral = data.nodes.filter(n => !n.isCentral);
+        const dirLabel = { both: 'any', upstream: 'upstream (used by)', downstream: 'downstream (depends on)' }[S.direction] || S.direction;
+        document.getElementById('sb-stats').textContent =
+          `${data.nodes.length} nodes · ${data.links.length} edges` +
+          (data.cycles.length ? ` · ${data.cycles.length} cycles` : '');
+
+        drawGraph(data);
+
+        // Inform user when no connections found
+        if (!nonCentral.length) {
+          const objLabel = `${schema}.${name}`;
+          const noiseHint = !S.noise ? ' — try enabling "Hide noise" to reduce clutter' : '';
+          const dirHint = S.direction !== 'both'
+            ? ` No ${dirLabel} connections. Try switching to "Both".`
+            : '';
+          showNoConnectionsBanner(objLabel, S.direction, dirHint, noiseHint);
+        } else {
+          hideNoConnectionsBanner();
         }
 
-        // Загрузка объектов для выбранной схемы
-        function loadObjects(schema) {
-            fetch(`/objects/${schema}`)
-                .then(response => response.json())
-                .then(objects => {
-                    const objectSelect = document.getElementById('object-select');
-                    objectSelect.innerHTML = '';
-                    objects.forEach(obj => {
-                        const option = document.createElement('option');
-                        option.value = obj.name;
-                        option.textContent = `${obj.name} (${obj.type})`;
-                        objectSelect.appendChild(option);
-                    });
-                });
+        // Auto-select the central node in inspector
+        const central = data.nodes.find(n => n.isCentral);
+        if (central) inspectNode(central);
+    })
+    .catch(e => {
+      btn.textContent = 'Load Graph';
+      showGraphMsg(`Error: ${e.message}`);
+    });
+}
+
+function reloadCurrentGraph() {
+  if (S.currentSchema && S.currentObject) fetchAndDrawGraph(S.currentSchema, S.currentObject);
+}
+
+// ════════════════════════════════════════════════════════
+// Graph drawing (dagre + D3)
+// ════════════════════════════════════════════════════════
+function showGraphMsg(msg) {
+  const svg = d3.select('#graph-svg');
+  svg.selectAll('*').remove();
+  svg.append('text').attr('x','50%').attr('y','50%').attr('text-anchor','middle')
+    .attr('dominant-baseline','middle').style('font-size','14px').style('fill','#8e8e93').text(msg);
+}
+
+function drawGraph(gd, impactOverlay) {
+  const svg = d3.select('#graph-svg');
+  svg.selectAll('*').remove();
+  if (!gd.nodes.length) { showGraphMsg('No dependencies found for this object.'); return; }
+
+  const panel = document.getElementById('graph-pane');
+  const W = panel.clientWidth || 800, H = panel.clientHeight || 600;
+
+  // Build impact sets
+  const directSet = new Set(), transitiveSet = new Set();
+  if (impactOverlay) {
+    (impactOverlay.direct || []).forEach(n => directSet.add(n.id));
+    (impactOverlay.transitive || []).forEach(n => transitiveSet.add(n.id));
+    (impactOverlay.breaking || []).forEach(n => directSet.add(n.id));
+    (impactOverlay.warning || []).forEach(n => transitiveSet.add(n.id));
+  }
+
+  // Dagre layout
+  const g = new dagre.graphlib.Graph({ multigraph: true });
+  g.setGraph({ rankdir:'LR', nodesep:42, ranksep:95, marginx:28, marginy:28 });
+  g.setDefaultEdgeLabel(() => ({}));
+
+  gd.nodes.forEach(n => {
+    const r = n.isCentral ? CENTRAL_R : NODE_R;
+    g.setNode(n.id, { width: r*2+64, height: r*2+10 });
+  });
+
+  const cyclicKeys = new Set();
+  (gd.cycles || []).forEach(cyc => {
+    for (let i=0; i<cyc.length; i++) cyclicKeys.add(`${cyc[i]}|||${cyc[(i+1)%cyc.length]}`);
+  });
+
+  gd.links.forEach((l,i) => g.setEdge(l.source, l.target, {}, `e${i}`));
+  dagre.layout(g);
+
+  const pos = {};
+  gd.nodes.forEach(n => { const p = g.node(n.id); pos[n.id] = p || {x:0, y:0}; });
+
+  // Fit
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  Object.values(pos).forEach(p => {
+    minX=Math.min(minX,p.x); minY=Math.min(minY,p.y);
+    maxX=Math.max(maxX,p.x); maxY=Math.max(maxY,p.y);
+  });
+  const gW=(maxX-minX)||1, gH=(maxY-minY)||1;
+  const scale=Math.min(1.35,(W-80)/(gW+60),(H-80)/(gH+60));
+  const tx=(W-gW*scale)/2-minX*scale, ty=(H-gH*scale)/2-minY*scale;
+
+  // Root group (must be declared BEFORE zoom handler)
+  const root = svg.append('g').attr('class','root');
+
+  const zoom = d3.zoom().scaleExtent([0.05,5])
+    .on('zoom', e => root.attr('transform', e.transform));
+  svg.call(zoom).call(zoom.transform, d3.zoomIdentity.translate(tx,ty).scale(scale));
+
+  // Defs
+  const defs = svg.append('defs');
+  [{id:'ar-dep',c:'#34c759'},{id:'ar-use',c:'#007AFF'},{id:'ar-cyc',c:'#ff3b30'}].forEach(({id,c}) => {
+    defs.append('marker').attr('id',id).attr('viewBox','0 -5 10 10')
+      .attr('refX',2).attr('refY',0).attr('markerWidth',7).attr('markerHeight',7).attr('orient','auto')
+      .append('path').attr('d','M0,-5L10,0L0,5').attr('fill',c);
+  });
+
+  // Glow filter for central node
+  const f = defs.append('filter').attr('id','cglow');
+  f.append('feGaussianBlur').attr('stdDeviation','3').attr('result','blur');
+  const fm = f.append('feMerge');
+  fm.append('feMergeNode').attr('in','blur');
+  fm.append('feMergeNode').attr('in','SourceGraphic');
+
+  // Edges
+  const lineGen = d3.line().x(p=>p.x).y(p=>p.y).curve(d3.curveCatmullRom.alpha(0.5));
+    root.append('g').selectAll('path').data(gd.links).enter().append('path')
+    .attr('class', d => {
+      const k = `${d.source}|||${d.target}`;
+      if (cyclicKeys.has(k)) return 'g-edge cyclic';
+      if (d.deep_scan)       return 'g-edge deep-scan';
+      return d.type==='depends_on' ? 'g-edge depends-on' : 'g-edge used-by';
+    })
+    .attr('marker-end', d => {
+      const k = `${d.source}|||${d.target}`;
+      if (cyclicKeys.has(k)) return 'url(#ar-cyc)';
+      return d.type==='depends_on' ? 'url(#ar-dep)' : 'url(#ar-use)';
+    })
+    .attr('d', (d,i) => {
+      const ed = g.edge(d.source, d.target, `e${i}`);
+      if (ed?.points?.length >= 2) return lineGen(ed.points);
+      const s=pos[d.source], t=pos[d.target];
+      return (s&&t) ? `M${s.x},${s.y}L${t.x},${t.y}` : '';
+    });
+
+  // Nodes
+  const tt = document.getElementById('g-tooltip');
+    // Evolution markers from S.evolutionTrace
+    const evoPathIds   = new Set();
+    const evoRenameIds = new Set();
+    if (S.evolutionTrace?.path) {
+      S.evolutionTrace.path.forEach(step => {
+        const id = `${step.schema}.${step.object}`;
+        evoPathIds.add(id);
+      });
+      const renameStepsEvo = new Set((S.evolutionTrace.renames||[]).map(r => r.step));
+      S.evolutionTrace.path.forEach(step => {
+        if (renameStepsEvo.has(step.step)) {
+          evoRenameIds.add(`${step.schema}.${step.object}`);
         }
+      });
+    }
 
-        // Загрузка и отображение графа
-        function loadGraph() {
-            const schema = document.getElementById('schema-select').value;
-            const object = document.getElementById('object-select').value;
+    const ng = root.append('g').selectAll('.g-node').data(gd.nodes).enter().append('g')
+    .attr('class', d => {
+      let cls = 'g-node';
+      if (d.isCentral) cls += ' central';
+      if (d.is_service) cls += ' service';
+      if (evoRenameIds.has(d.id))     cls += ' evolution-rename';
+      else if (evoPathIds.has(d.id))  cls += ' evolution';
+      if (directSet.has(d.id)) cls += ' impact-direct';
+      else if (transitiveSet.has(d.id)) cls += ' impact-transitive';
+      return cls;
+    })
+    .attr('transform', d => `translate(${pos[d.id].x},${pos[d.id].y})`)
+    .on('click',  (ev,d) => { ev.stopPropagation(); inspectNode(d); })
+    .on('dblclick', (ev,d) => { ev.stopPropagation(); selectObject(d.schema, d.name); })
+    .on('mouseover', (ev,d) => {
+      tt.style.opacity='0'; // hide simple tooltip, use meta popup
+      showMetaPopup(ev, d.schema, d.name);
+    })
+    .on('mousemove', ev => {
+      const popup = document.getElementById('meta-popup');
+      if (popup.classList.contains('visible')) {
+        const x = Math.min(ev.clientX + 16, window.innerWidth - 300);
+        const y = Math.min(ev.clientY + 8,  window.innerHeight - 180);
+        popup.style.left = x + 'px';
+        popup.style.top  = y + 'px';
+      }
+    })
+    .on('mouseout', () => hideMetaPopup());
 
-            fetch(`/graph/${schema}/${object}`)
-                .then(response => response.json())
-                .then(data => {
-                    drawGraph(data);
-                });
+  ng.append('circle')
+    .attr('r', d => d.isCentral ? CENTRAL_R : NODE_R)
+    .style('fill', d => nc(d.type))
+    .style('stroke', d => {
+      if (d.isCentral) return '#1d1d1f';
+      if (directSet.has(d.id)) return '#ff3b30';
+      if (transitiveSet.has(d.id)) return '#ff9500';
+      return 'rgba(255,255,255,0.7)';
+    })
+    .style('stroke-width', d => (d.isCentral || directSet.has(d.id) || transitiveSet.has(d.id)) ? '2.5px' : '1.5px')
+    .style('filter', d => d.isCentral ? 'url(#cglow)' : null);
+
+  // Impact badge
+  // Evolution rename badge (⇒ orange, top-left)
+  ng.filter(d => evoRenameIds.has(d.id))
+    .append('circle')
+    .attr('cx', d => -(d.isCentral ? CENTRAL_R : NODE_R) * 0.68)
+    .attr('cy', d => -(d.isCentral ? CENTRAL_R : NODE_R) * 0.68)
+    .attr('r', 7).style('fill','#ff9500').style('stroke','#fff').style('stroke-width','1.5px');
+
+  ng.filter(d => evoRenameIds.has(d.id))
+    .append('text')
+    .attr('class','node-impact-badge')
+    .attr('text-anchor','middle').attr('dominant-baseline','central')
+    .attr('x', d => -(d.isCentral ? CENTRAL_R : NODE_R) * 0.68)
+    .attr('y', d => -(d.isCentral ? CENTRAL_R : NODE_R) * 0.68)
+    .style('font-size','8px').style('font-weight','800').style('fill','#fff').text('⇒');
+
+  // Impact badge (! or ~, top-right)
+  ng.filter(d => directSet.has(d.id) || transitiveSet.has(d.id))
+    .append('circle')
+    .attr('cx', d => (d.isCentral ? CENTRAL_R : NODE_R) * 0.68)
+    .attr('cy', d => -(d.isCentral ? CENTRAL_R : NODE_R) * 0.68)
+    .attr('r', 6.5)
+    .style('fill', d => directSet.has(d.id) ? '#ff3b30' : '#ff9500')
+    .style('stroke', '#fff').style('stroke-width','1.5px');
+
+  ng.filter(d => directSet.has(d.id) || transitiveSet.has(d.id))
+    .append('text')
+    .attr('class','node-impact-badge')
+    .attr('text-anchor','middle').attr('dominant-baseline','central')
+    .attr('x', d => (d.isCentral ? CENTRAL_R : NODE_R) * 0.68)
+    .attr('y', d => -(d.isCentral ? CENTRAL_R : NODE_R) * 0.68)
+    .style('font-size','8px').style('font-weight','800').style('fill','#fff')
+    .text(d => directSet.has(d.id) ? '!' : '~');
+
+  // Labels inside circle
+  ng.append('text').attr('text-anchor','middle').attr('dominant-baseline','central')
+    .style('fill','#fff').style('font-size', d => d.isCentral ? '10px' : '8px')
+    .style('font-weight', d => d.isCentral ? '800' : '600')
+    .text(d => { const m=d.isCentral?10:8; return d.name.length>m ? d.name.slice(0,m-1)+'…' : d.name; });
+
+  // Label below
+  ng.append('text').attr('text-anchor','middle')
+    .attr('dy', d => (d.isCentral ? CENTRAL_R : NODE_R)+13)
+    .style('fill','#6e6e73').style('font-size','10px')
+    .text(d => d.name.length>18 ? d.name.slice(0,17)+'…' : d.name);
+}
+
+// ════════════════════════════════════════════════════════
+// Inspector
+// ════════════════════════════════════════════════════════
+function inspectNode(node) {
+  S.selectedNode = node;
+  document.getElementById('inspector-obj').innerHTML =
+    `${node.schema}.<b>${node.name}</b> <span id="inspector-obj-type">${buildTag(node.type)}</span>`;
+  document.getElementById('sb-obj-info').textContent = `${node.schema}.${node.name}`;
+  // Update sidebar selection
+  document.querySelectorAll('.sb-item').forEach(el =>
+    el.classList.toggle('selected', el.dataset.name === node.name));
+  renderTab(S.tab);
+}
+
+function buildTag(type) {
+  const cls = {TABLE:'tag-table',VIEW:'tag-view',MATERIALIZED_VIEW:'tag-mv',FUNCTION:'tag-fn'}[type]||'';
+  return `<span class="tag ${cls}">${type.replace('_',' ')}</span>`;
+}
+
+function switchTab(tab) {
+  S.tab = tab;
+  document.querySelectorAll('.ins-tab').forEach(el =>
+    el.classList.toggle('active', el.dataset.tab === tab));
+  if (S.selectedNode) renderTab(tab);
+}
+
+function renderTab(tab) {
+  const node = S.selectedNode;
+  if (!node) return;
+  const body = document.getElementById('inspector-body');
+
+  if      (tab === 'info')     renderInfo(node, body);
+  else if (tab === 'ddl')      renderDDL(node, body);
+  else if (tab === 'columns')  renderColumns(node, body);
+  else if (tab === 'pipeline') renderPipeline(node, body);
+  else if (tab === 'impact')   renderImpact(node, body);
+}
+
+// ── Info tab ─────────────────────────────────────────────
+function renderInfo(node, body) {
+  const key = `${node.schema}.${node.name}`;
+  if (S.metaCache[key]) {
+    displayInfo(S.metaCache[key], body);
+    return;
+  }
+  body.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  fetch(`/metadata/${node.schema}/${node.name}`)
+    .then(r => r.json())
+    .then(m => { S.metaCache[key] = m; displayInfo(m, body); });
+}
+
+function displayInfo(m, body) {
+  const row = (k,v) => v != null ? `<div class="info-row"><span class="info-key">${k}</span><span class="info-val">${v}</span></div>` : '';
+  body.innerHTML = `
+    <div class="info-section">
+      <div class="info-title">Object</div>
+      ${row('Type', m.object_type)}
+      ${row('Schema', m.schema)}
+      ${row('Name', m.name)}
+      ${row('Owner', m.owner)}
+    </div>
+    <div class="info-section">
+      <div class="info-title">Storage</div>
+      ${row('Size on disk', m.size)}
+      ${row('Est. rows', m.est_rows != null ? Number(m.est_rows).toLocaleString() : null)}
+      ${row('Live rows', m.live_rows != null ? Number(m.live_rows).toLocaleString() : null)}
+      ${row('Last analyzed', m.last_analyze ? m.last_analyze.slice(0,16) : 'Never')}
+    </div>
+    ${m.description ? `<div class="info-section"><div class="info-title">Description</div><div class="info-desc">${m.description}</div></div>` : ''}
+  `;
+}
+
+// ── DDL tab ──────────────────────────────────────────────
+function renderDDL(node, body) {
+  body.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+
+  // Load DDL and column list in parallel
+  Promise.all([
+    fetch(`/ddl/${node.schema}/${node.name}`).then(r => r.text()),
+    fetch(`/graph/${node.schema}/${node.name}/columns`).then(r => r.json()).catch(() => null),
+  ]).then(([ddl, colData]) => {
+    const cols = colData
+      ? [...new Set([
+          ...(colData.columns || []),
+          ...(colData.lineage || []).map(r => r.target_col),
+        ])]
+      : [];
+
+    let header = '';
+    if (cols.length) {
+      const ns = esc(node.schema), nn = esc(node.name);
+      header = `<div style="display:flex;align-items:center;gap:8px;padding:6px 12px;
+                     background:var(--bg-inset);border-bottom:1px solid var(--border2);
+                     flex-shrink:0">
+        <span style="font-size:11px;color:var(--text2)">Trace column:</span>
+        <select id="ddl-trace-sel" style="font-size:11px;padding:3px 6px;border-radius:5px;
+                  border:1px solid var(--border);background:var(--bg-el);color:var(--text);
+                  flex:1;max-width:200px">
+          ${cols.map(c => `<option value="${esc(c)}">${c}</option>`).join('')}
+        </select>
+        <button style="font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid var(--accent);
+                  background:var(--accent-light);color:var(--accent-text);cursor:pointer;font-weight:600"
+          onclick="traceColumnAlias('${ns}','${nn}',document.getElementById('ddl-trace-sel').value)">
+          🔍 Trace evolution
+        </button>
+      </div>`;
+    }
+
+    let ddlHtml = highlightDDL(ddl);
+    ddlHtml = _applyDDLHighlight(ddlHtml);   // apply evolution highlight if pending
+    body.innerHTML = `<div id="ddl-wrap" style="display:flex;flex-direction:column;height:100%">
+      ${header}
+      <div id="ddl-code" style="flex:1;overflow:auto;padding:10px 12px">${ddlHtml}</div>
+    </div>`;
+  });
+}
+
+/**
+ * Highlight all schema.object references in DDL text.
+ *
+ * Strategy (single-pass on raw text):
+ * 1. Build a regex from all known schemas.
+ * 2. Find every schema.object pair — qualified names are unambiguous.
+ * 3. Replace with a clickable span, coloured by type if known from the graph.
+ * 4. Escape everything else as HTML.
+ *
+ * Only qualified names (schema.name) are highlighted to avoid false positives
+ * with local PL/pgSQL variables or SQL keywords.
+ */
+function highlightDDL(ddl) {
+  const schemas = S.schemas || [];
+  if (!schemas.length) return `<pre id="ddl-pre" style="margin:0">${escHtml(ddl)}</pre>`;
+
+  // Build type-lookup from graph nodes (exact colour if we know the type)
+  const nodeMap = {};
+  if (S.graphData?.nodes) {
+    S.graphData.nodes.forEach(n => {
+      nodeMap[`${n.schema}.${n.name}`.toLowerCase()] = n;
+    });
+  }
+  // Also add objects from the loaded sidebar list for the current schema
+  if (S.currentSchema && S.allObjects?.length) {
+    S.allObjects.forEach(o => {
+      const k = `${S.currentSchema}.${o.name}`.toLowerCase();
+      if (!nodeMap[k]) nodeMap[k] = { schema: S.currentSchema, name: o.name, type: o.type };
+    });
+  }
+
+  // Escape schema names for use in regex
+  const schemaAlt = schemas
+    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  const pattern = new RegExp(`\\b(${schemaAlt})\\.(\\w+)\\b`, 'gi');
+
+  let out = '';
+  let last = 0;
+  let m;
+
+  while ((m = pattern.exec(ddl)) !== null) {
+    // Escape the plain text segment before this match
+    out += escHtml(ddl.slice(last, m.index));
+
+    const schema = m[1];
+    const name   = m[2];
+    const key    = `${schema}.${name}`.toLowerCase();
+    const info   = nodeMap[key];
+
+    // Colour: known type → type colour; unknown → neutral indigo
+    const color  = info ? nc(info.type) : '#5e5ce6';
+    const label  = escHtml(m[0]);
+
+    out += `<span class="obj-link ddl-ref"
+      style="background:${color}15;color:${color};border-bottom:1px dashed ${color}55"
+      title="Navigate to ${schema}.${name}"
+      onclick="selectObject('${esc(schema)}','${esc(name)}')">${label}</span>`;
+
+    last = m.index + m[0].length;
+  }
+
+  out += escHtml(ddl.slice(last));
+  return `<pre id="ddl-pre" style="margin:0">${out}</pre>`;
+}
+
+// ── Columns tab ──────────────────────────────────────────
+function renderColumns(node, body) {
+  const key = `${node.schema}.${node.name}`;
+  if (S.colCache[key]) {
+    node.type === 'FUNCTION'
+      ? displayFunctionColumns(S.colCache[key], node, body)
+      : displayColumns(S.colCache[key], node, body);
+    return;
+  }
+  body.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+
+  if (node.type === 'FUNCTION') {
+    // Load outputs + inputs in parallel
+    Promise.all([
+      fetch(`/function/${node.schema}/${node.name}/outputs`).then(r => r.json()),
+      fetch(`/function/${node.schema}/${node.name}/inputs`).then(r => r.json()),
+    ]).then(([outputs, inputs]) => {
+      const data = { outputs, inputs };
+      S.colCache[key] = data;
+      displayFunctionColumns(data, node, body);
+    }).catch(e => {
+      body.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`;
+    });
+  } else {
+    fetch(`/graph/${node.schema}/${node.name}/columns`)
+      .then(r => r.json())
+      .then(d => { S.colCache[key] = d; displayColumns(d, node, body); });
+  }
+}
+
+// ── Function columns: output + input sections ─────────────────────────
+function displayFunctionColumns(data, node, body) {
+  const { outputs, inputs } = data;
+  const ns = esc(node.schema), nn = esc(node.name);
+  let html = '';
+
+  // ── Output columns (signature) ────────────────────────────────────
+  const outs = outputs?.outputs || [];
+  if (outs.length) {
+    html += `<div class="col-flow">
+      <div class="col-flow-title">
+        Output columns
+        <span style="font-weight:400;color:var(--text2)">${outs.length} from ${outputs.result_sig || 'RETURNS TABLE'}</span>
+      </div>`;
+    outs.forEach(col => {
+      html += `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--border2)">
+        <span style="font-size:12px;font-weight:700;font-family:var(--font-mono);flex:1;color:var(--green)">${col.name}</span>
+        ${col.pg_type ? `<span style="font-size:10px;color:var(--text3)">${col.pg_type}</span>` : ''}
+        <button class="col-sim-btn" style="color:var(--accent);border-color:var(--accent)"
+          onclick="traceColumnAlias('${ns}','${nn}','${esc(col.name)}')">🔍 Trace</button>
+        <button class="col-sim-btn"
+          onclick="simulateColumnImpactDirect('${ns}','${nn}','${esc(col.name)}')">⚠ Drop</button>
+      </div>`;
+    });
+    html += '</div>';
+  } else {
+    const sig = outputs?.result_sig || '';
+    html += `<div class="col-flow">
+      <div class="col-flow-title">Output</div>
+      <div style="font-size:11px;color:var(--text2)">${sig || 'void or scalar return'}</div>
+    </div>`;
+  }
+
+  // ── Input column references (function body analysis) ──────────────
+  const ins = inputs?.inputs || [];
+  const tables = inputs?.tables || [];
+
+  if (ins.length) {
+    // Group by table
+    const byTable = {};
+    ins.forEach(item => {
+      if (!byTable[item.table_fqn]) byTable[item.table_fqn] = [];
+      byTable[item.table_fqn].push(item);
+    });
+
+    html += `<div class="col-flow" style="border-top:2px solid var(--border)">
+      <div class="col-flow-title">
+        Input column references
+        <span style="font-weight:400;color:var(--text2)">${ins.length} used from ${tables.length} object${tables.length!==1?'s':''}</span>
+        <span style="font-size:10px;color:var(--text3)">· dot-qualifier ✓ = confirmed</span>
+      </div>`;
+
+    Object.entries(byTable).forEach(([fqn, cols]) => {
+      const [ts, tn] = fqn.split('.');
+      html += `<div style="margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px;
+                    padding:3px 6px;background:var(--bg-inset);border-radius:5px;
+                    display:flex;align-items:center;justify-content:space-between">
+          <span>${fqn}</span>
+          <span style="font-size:10px;font-weight:400;color:var(--text3)">${cols.length} col${cols.length!==1?'s':''}</span>
+        </div>`;
+      cols.forEach(item => {
+        const confirmed = item.confirmed;
+        html += `<div style="display:flex;align-items:center;gap:6px;padding:4px 0 4px 8px;
+                             border-bottom:1px solid var(--border2)">
+          <span style="font-size:12px;font-weight:600;font-family:var(--font-mono);flex:1;
+                       color:${confirmed ? 'var(--text)' : 'var(--text2)'}">${item.column}
+            ${confirmed ? '<span style="font-size:9px;color:var(--green)">✓</span>'
+                        : '<span style="font-size:9px;color:var(--text3)">~</span>'}
+          </span>
+          ${item.pg_type ? `<span style="font-size:10px;color:var(--text3)">${item.pg_type}</span>` : ''}
+          <button class="col-sim-btn" style="color:var(--accent);border-color:var(--accent)"
+            onclick="traceColumnAlias('${esc(ts)}','${esc(tn)}','${esc(item.column)}')">🔍 Trace</button>
+          <button class="col-sim-btn"
+            onclick="simulateColumnImpactDirect('${esc(ts)}','${esc(tn)}','${esc(item.column)}')">⚠ Drop</button>
+        </div>`;
+      });
+      html += '</div>';
+    });
+    html += '</div>';
+  } else if (tables.length) {
+    html += `<div class="col-flow" style="border-top:2px solid var(--border)">
+      <div class="col-flow-title">References</div>
+      ${tables.map(t => `<span class="tag tag-table" style="margin:2px">${t}</span>`).join('')}
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">No column-level usage detected (possibly dynamic SQL).</div>
+    </div>`;
+  } else {
+    html += `<div class="col-flow" style="border-top:2px solid var(--border)">
+      <div class="empty-state" style="padding:16px">No input column references found.</div>
+    </div>`;
+  }
+
+  body.innerHTML = html;
+}
+
+function displayColumns(data, node, body) {
+  if (data.error && !data.lineage?.length && !data.columns?.length) {
+    body.innerHTML = `<div class="col-flow">
+      <div class="col-flow-title">⚠ Note</div>
+      <div style="font-size:11px;color:var(--text2)">${data.error}</div>
+      <button class="tb-btn" style="margin-top:8px" onclick="switchTab('pipeline')">
+        View Pipeline instead →
+      </button>
+    </div>`;
+    return;
+  }
+
+  let html = '';
+
+  if (data.source_tables?.length) {
+    html += `<div class="col-flow"><div class="col-flow-title">Source tables</div>`;
+    data.source_tables.forEach(t => html += `<span class="tag tag-table" style="margin:2px">${t}</span>`);
+    html += '</div>';
+  }
+
+  if (data.lineage?.length) {
+    // Detect renames: source_col != target_col
+    const hasRenames = data.lineage.some(r => r.source_col !== r.target_col);
+    html += `<div class="col-flow">
+      <div class="col-flow-title">
+        Column lineage
+        <span style="font-weight:400;color:var(--text2)">${data.lineage.length} mappings</span>
+        ${hasRenames ? `<span class="alias-rename-badge">⚠ aliases detected</span>` : ''}
+      </div>`;
+    data.lineage.forEach(row => {
+      const isAliased = row.source_col !== row.target_col;
+      html += `<div class="col-flow-item" ${isAliased ? 'style="border-color:var(--orange)"' : ''}>
+        <div class="col-flow-src">
+          <span class="col-flow-col">${row.source_col}</span>
+          <span class="col-flow-obj">${row.source_obj}</span>
+        </div>
+        <div class="col-flow-arrow" ${isAliased ? 'style="color:var(--orange)"' : ''}>
+          ${isAliased ? '⇒' : '→'}
+        </div>
+        <div class="col-flow-tgt">
+          <span class="col-flow-col" ${isAliased ? 'style="color:var(--orange)"' : ''}>${row.target_col}</span>
+          <span class="col-flow-obj">${row.target_obj}</span>
+        </div>
+      </div>
+      <button class="col-sim-btn" onclick="traceColumnAlias('${esc(node.schema)}','${esc(node.name)}','${esc(row.target_col)}')">
+        🔍 Trace alias evolution
+      </button>`;
+    });
+    html += '</div>';
+
+    // Simulate drop/rename bar
+    const uniqueCols = [...new Set(data.lineage.map(r => r.target_col))];
+    html += `<div class="col-flow" style="border-top:1px solid var(--border2);margin-top:4px">
+      <div class="col-flow-title">Simulate column change</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="sim-col-select" id="sim-col-sel">
+          ${uniqueCols.map(c => `<option value="${esc(c)}">${c}</option>`).join('')}
+        </select>
+        <button class="simulate-btn" onclick="simulateColumnImpact('${esc(node.schema)}','${esc(node.name)}')">
+          Simulate drop
+        </button>
+      </div>
+      <div class="col-sim-result" id="col-sim-result"></div>
+    </div>`;
+  } else if (data.columns?.length) {
+    const ns = esc(node.schema), nn = esc(node.name);
+    html += `<div class="col-flow">
+      <div class="col-flow-title">
+        Columns <span style="font-weight:400;color:var(--text2)">${data.columns.length}</span>
+        <span style="font-size:10px;color:var(--text3)"> — click 🔍 to trace name across pipeline</span>
+      </div>`;
+    data.columns.forEach(c => {
+      html += `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--border2)">
+        <span style="font-size:12px;font-weight:600;font-family:var(--font-mono);flex:1;color:var(--text)">${c}</span>
+        <button class="col-sim-btn" style="color:var(--accent);border-color:var(--accent)"
+          onclick="traceColumnAlias('${ns}','${nn}','${esc(c)}')">🔍 Trace</button>
+        <button class="col-sim-btn"
+          onclick="simulateColumnImpactDirect('${ns}','${nn}','${esc(c)}')">⚠ Drop</button>
+      </div>`;
+    });
+    html += '</div>';
+  } else {
+    html = '<div class="empty-state">No column lineage data available.</div>';
+  }
+
+  if (data.error) html += `<div style="padding:8px 14px;font-size:11px;color:var(--text3)">${data.error}</div>`;
+  body.innerHTML = html;
+}
+
+// ── Impact tab ───────────────────────────────────────────
+function renderImpact(node, body) {
+  body.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  fetch(`/impact/${node.schema}/${node.name}`)
+    .then(r => r.json())
+    .then(d => displayImpact(d, node, body));
+}
+
+function displayImpact(d, node, body) {
+  if (d.error) { body.innerHTML = `<div class="empty-state">${d.error}</div>`; return; }
+
+  let html = `<div class="impact-summary">
+    <div class="impact-stat direct">
+      <div class="impact-stat-num">${d.direct.length}</div>
+      <div class="impact-stat-lbl">Direct</div>
+    </div>
+    <div class="impact-stat transitive">
+      <div class="impact-stat-num">${d.transitive.length}</div>
+      <div class="impact-stat-lbl">Transitive</div>
+    </div>
+  </div>`;
+
+  if (!d.total) {
+    html += '<div class="empty-state" style="padding:20px 14px">No dependent objects found.<br><span style="color:var(--text3)">This object is a leaf node.</span></div>';
+    body.innerHTML = html;
+    return;
+  }
+
+  const methodBadge = m => m === 'lineage'
+    ? `<span style="font-size:9px;background:rgba(52,199,89,0.15);color:#248942;border-radius:4px;padding:1px 5px;margin-left:4px">lineage ✓</span>`
+    : m === 'text_search'
+    ? `<span style="font-size:9px;background:rgba(255,149,0,0.12);color:#a05f00;border-radius:4px;padding:1px 5px;margin-left:4px">text ~</span>`
+    : '';
+
+  const impactItem = (item, cls, dot) =>
+    `<div class="impact-item" onclick="selectObject('${esc(item.schema)}','${esc(item.name)}')">
+      <span class="impact-item-icon">${ti(item.type)}</span>
+      <div style="flex:1;min-width:0">
+        <div class="impact-item-name">${item.name}${methodBadge(item.method)}</div>
+        <div class="impact-item-schema">${item.schema}</div>
+        ${item.detail ? `<div style="font-size:10px;color:var(--text3);margin-top:1px">${item.detail}</div>` : ''}
+      </div>
+    </div>`;
+
+  if (d.direct.length) {
+    html += `<div class="impact-section">
+      <div class="impact-sec-title"><div class="impact-dot" style="background:var(--impact-direct)"></div>Direct (${d.direct.length}) — breaking</div>`;
+    d.direct.forEach(item => html += impactItem(item));
+    html += '</div>';
+  }
+
+  if (d.transitive.length) {
+    html += `<div class="impact-section">
+      <div class="impact-sec-title"><div class="impact-dot" style="background:var(--impact-transitive)"></div>Transitive (${d.transitive.length}) — potentially affected</div>`;
+    d.transitive.forEach(item => html += impactItem(item));
+    html += '</div>';
+  }
+
+  // "Show on graph" button
+  html += `<div style="padding:10px 14px;border-top:1px solid var(--border2)">
+    <button class="tb-btn" style="width:100%;justify-content:center" onclick="showImpactOnGraph()">
+      🔴 Show impact on graph
+    </button>
+  </div>`;
+
+  body.innerHTML = html;
+  body._impactData = d;
+}
+
+function showImpactOnGraph() {
+  if (!document.getElementById('inspector-body')._impactData) return;
+  const d = document.getElementById('inspector-body')._impactData;
+  activateImpactMode(d, `${d.direct.length} direct · ${d.transitive.length} transitive`);
+}
+
+// ════════════════════════════════════════════════════════
+// Pipeline tab
+// ════════════════════════════════════════════════════════
+const pipelineCache = {};
+
+function renderPipeline(node, body) {
+  const key = `${node.schema}.${node.name}`;
+  if (pipelineCache[key]) { displayPipeline(pipelineCache[key], body); return; }
+  body.innerHTML = '<div class="empty-state"><div class="spinner"></div><br>Building pipeline…</div>';
+  fetch(`/pipeline/${node.schema}/${node.name}`)
+    .then(r => r.json())
+    .then(d => { pipelineCache[key] = d; displayPipeline(d, body); })
+    .catch(e => { body.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`; });
+}
+
+function displayPipeline(d, body) {
+  if (d.error) { body.innerHTML = `<div class="empty-state">${d.error}</div>`; return; }
+
+  const c = d.central;
+  const stats = d.stats || {};
+  let html = '';
+
+  // Stats summary
+  html += `<div style="display:flex;gap:8px;padding:10px 12px 6px">
+    <div class="impact-stat" style="flex:1;padding:7px">
+      <div class="impact-stat-num" style="font-size:16px;color:var(--blue)">${stats.upstream_count||0}</div>
+      <div class="impact-stat-lbl">Upstream</div>
+    </div>
+    <div class="impact-stat" style="flex:1;padding:7px">
+      <div class="impact-stat-num" style="font-size:16px;color:var(--green)">${stats.downstream_count||0}</div>
+      <div class="impact-stat-lbl">Downstream</div>
+    </div>
+    <div class="impact-stat" style="flex:1;padding:7px">
+      <div class="impact-stat-num" style="font-size:16px;color:var(--purple)">${stats.alias_chain_count||0}</div>
+      <div class="impact-stat-lbl">Renames</div>
+    </div>
+  </div>`;
+
+  // ── Upstream chain ──────────────────────────────────────────────────────
+  if (d.upstream_chain?.length) {
+    html += `<div class="pipe-chain">
+      <div class="pipe-chain-title"><span style="color:var(--blue)">↑</span> Upstream sources (${d.upstream_chain.length})</div>`;
+    d.upstream_chain.forEach((n, i) => {
+      html += pipeNode(n, 'upstream-node', i < d.upstream_chain.length - 1);
+    });
+    html += pipeConnector() + `</div>`;
+  }
+
+  // ── Central object ────────────────────────────────────────────────────
+  html += `<div style="padding:0 12px 0">
+    <div class="pipe-card central" onclick="selectObject('${esc(c.schema)}','${esc(c.name)}')">
+      <div class="pipe-card-name">${c.name}</div>
+      <div class="pipe-card-meta">${c.schema} · ${buildTag(c.type)}</div>
+      ${(d.central_columns?.columns?.length) ? `<div class="pipe-card-cols">📋 ${d.central_columns.columns.length} columns</div>` : ''}
+    </div>
+  </div>`;
+
+  // ── Downstream chain ──────────────────────────────────────────────────
+  if (d.downstream_chain?.length) {
+    html += `<div class="pipe-chain">`;
+    d.downstream_chain.forEach((n, i) => {
+      html += pipeConnector() + pipeNode(n, 'downstream-node', false);
+    });
+    html += `<div class="pipe-chain-title" style="margin-top:4px"><span style="color:var(--green)">↓</span> Downstream consumers (${d.downstream_chain.length})</div></div>`;
+  }
+
+  // ── Attribute alias evolution ─────────────────────────────────────────
+  if (d.alias_chains?.length) {
+    html += `<div class="alias-chain">
+      <div class="alias-chain-title">
+        <span>🔄</span> Attribute evolution — ${d.alias_chains.length} column${d.alias_chains.length>1?'s':''} traced
+      </div>`;
+
+    d.alias_chains.forEach(chain => {
+      if (!chain.path?.length) return;
+      html += `<div style="margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">
+          <span style="font-family:var(--font-mono)">${chain.column}</span>
+          ${chain.renames?.length ? `<span class="alias-rename-badge">${chain.renames.length} rename${chain.renames.length>1?'s':''}</span>` : ''}
+        </div>
+        <div class="alias-row">`;
+
+      const path = chain.path;
+      const renameSteps = new Set((chain.renames||[]).map(r => r.step));
+
+      path.forEach((step, i) => {
+        const isRenamed = renameSteps.has(step.step) && step.alias_of && step.alias_of !== step.column;
+        html += `<div class="alias-hop">
+          <div class="alias-col ${isRenamed ? 'renamed' : ''}" title="${step.schema}.${step.object}">${step.column}</div>
+          <div class="alias-obj">${step.object}</div>
+          ${isRenamed ? `<div style="font-size:9px;color:var(--orange)">← ${step.alias_of}</div>` : ''}
+        </div>`;
+        if (i < path.length - 1) html += `<span class="alias-arrow">→</span>`;
+      });
+
+      html += `</div></div>`;
+    });
+    html += '</div>';
+  } else if (!d.alias_chains?.length && (d.upstream_chain?.length || d.downstream_chain?.length)) {
+    html += `<div style="padding:8px 12px;font-size:11px;color:var(--text3)">
+      ℹ No column alias evolution detected — either column lineage is unavailable or all column names are consistent.
+    </div>`;
+  }
+
+  if (!d.upstream_chain?.length && !d.downstream_chain?.length) {
+    html += '<div class="empty-state" style="padding:20px">No pipeline dependencies found.<br><span style="color:var(--text3)">This may be an isolated object.</span></div>';
+  }
+
+  body.innerHTML = html;
+}
+
+function pipeNode(n, cls, hasMore) {
+  return `<div class="pipe-node">
+    <div class="pipe-connector">
+      <div class="pipe-dot" style="color:${cls.includes('upstream') ? 'var(--blue)' : 'var(--green)'}"></div>
+      ${hasMore ? '<div class="pipe-line"></div>' : ''}
+    </div>
+    <div class="pipe-card ${cls}" onclick="selectObject('${esc(n.schema)}','${esc(n.name)}')">
+      <div class="pipe-card-name">${n.name}</div>
+      <div class="pipe-card-meta">${n.schema} · <span>${n.type.replace('_',' ')}</span></div>
+    </div>
+  </div>`;
+}
+
+function pipeConnector() {
+  return `<div style="display:flex"><div style="width:20px;display:flex;justify-content:center"><div style="width:2px;height:16px;background:var(--border)"></div></div></div>`;
+}
+
+// ════════════════════════════════════════════════════════
+// Impact mode
+// ════════════════════════════════════════════════════════
+function activateImpactMode(impactData, label) {
+  S.impactMode = true;
+  S.impactData = impactData;
+  document.getElementById('impact-banner-text').textContent = label;
+  document.getElementById('impact-banner').classList.add('visible');
+  if (S.graphData) drawGraph(S.graphData, impactData);
+  // Update sidebar badges
+  (impactData.direct || impactData.breaking || []).forEach(item => {
+    const badge = document.getElementById(`badge-${item.name}`);
+    if (badge) { badge.textContent = '!'; badge.style.display = 'block'; }
+    const sbItem = document.querySelector(`.sb-item[data-name="${item.name}"]`);
+    if (sbItem) sbItem.classList.add('has-impact');
+  });
+}
+
+function clearImpactMode(redraw = true) {
+  S.impactMode = false; S.impactData = null; S.impactColumn = null;
+  document.getElementById('impact-banner').classList.remove('visible');
+  document.querySelectorAll('.sb-item').forEach(el => el.classList.remove('has-impact'));
+  document.querySelectorAll('.sb-item-badge').forEach(el => { el.textContent=''; el.style.display='none'; });
+  if (redraw && S.graphData) drawGraph(S.graphData);
+}
+
+// ════════════════════════════════════════════════════════
+// Alias trace (opens Pipeline tab with the specific column traced)
+// ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// Column alias evolution — shows in the bottom attr-panel
+// ════════════════════════════════════════════════════════
+function traceColumnAlias(schema, name, col) {
+  console.log('[TRACE] called:', schema, name, col);
+  const panel = document.getElementById('attr-panel');
+  const attrBody  = document.getElementById('attr-body');
+  const attrTitle = document.getElementById('attr-title');
+
+  if (!panel || !attrBody || !attrTitle) {
+    console.error('[TRACE] attr-panel elements missing!');
+    return;
+  }
+
+  attrTitle.textContent = `🔍 Tracing "${col}" in ${schema}.${name}…`;
+  attrBody.innerHTML = '<div style="padding:16px;color:var(--text3);display:flex;align-items:center;gap:8px"><span class="spinner"></span> Loading full pipeline…</div>';
+  panel.style.display = 'flex';
+
+  const url = `/lineage/attribute/${schema}/${name}/${encodeURIComponent(col)}?direction=both`;
+  console.log('[TRACE] fetching:', url);
+  fetch(url)
+    .then(r => { console.log('[TRACE] response status:', r.status); return r.json(); })
+    .then(trace => {
+      console.log('[TRACE] data:', trace);
+      // Store for main graph markers
+      if (trace.path?.length > 1) {
+        S.evolutionTrace = trace;
+        if (S.graphData) drawGraph(S.graphData);   // redraw with evolution markers
+      }
+      _renderAttrEvolution(trace, attrTitle, attrBody);
+    })
+    .catch(e => {
+      console.error('[TRACE] error:', e);
+      attrBody.innerHTML = `<div style="color:var(--red);padding:12px">Error: ${e.message}</div>`;
+    });
+}
+
+function _renderAttrEvolution(data, titleEl, body) {
+  const rCount = data.renames?.length || 0;
+  const hCount = data.total_hops || 0;
+  const col    = data.start?.column || '?';
+  const obj    = `${data.start?.schema}.${data.start?.object}`;
+
+  titleEl.textContent =
+    `🔍 Column evolution: "${col}"  in  ${obj}` +
+    `  —  ${hCount} hop${hCount!==1?'s':''}` +
+    (rCount ? `  ·  ⚠ ${rCount} rename${rCount!==1?'s':''}` : '  ·  no renames');
+
+  const path       = data.path || [];
+  const renameSet  = new Set((data.renames||[]).map(r => r.step));
+  const upstream   = path.filter(s => s.direction === 'upstream').reverse();
+  const central    = path.filter(s => s.direction === 'start');
+  const downstream = path.filter(s => s.direction === 'downstream');
+
+  if (!path.length) {
+    body.innerHTML = `<div style="padding:16px 18px">
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;
+                  background:var(--bg-inset);border-radius:var(--radius);
+                  border:1px solid var(--border)">
+        <div style="font-size:22px">📌</div>
+        <div>
+          <div style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:var(--text)">${col}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">
+            in <b>${data.start?.schema}.${data.start?.object}</b>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:5px">
+            No evolution chain detected. This column may be a leaf (source table with no tracked consumers),
+            or downstream objects use dynamic SQL / unresolvable aliases.
+          </div>
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button style="font-size:11px;padding:4px 12px;border-radius:6px;border:1px solid var(--accent);
+                    background:var(--accent-light);color:var(--accent-text);cursor:pointer;font-weight:600"
+              onclick="navigateAndHighlight('${esc(data.start?.schema)}','${esc(data.start?.object)}','${esc(col)}',null)">
+              View in DDL
+            </button>
+            <button style="font-size:11px;padding:4px 12px;border-radius:6px;border:1px solid var(--border);
+                    background:var(--bg-el);color:var(--text2);cursor:pointer"
+              onclick="closeAttrPanel()">Dismiss</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  // ── Node card renderer ──────────────────────────────────────────────
+  function card(step) {
+    const color   = nc(step.obj_type);
+    const renamed = renameSet.has(step.step) && step.alias_of && step.alias_of !== step.column;
+    const isRoot  = step.direction === 'start';
+    const border  = isRoot ? 'var(--accent)' : step.direction === 'upstream' ? 'var(--blue)' : 'var(--green)';
+    const bg      = isRoot ? 'var(--accent-light)' : renamed ? 'rgba(255,149,0,0.07)' : 'var(--bg-el)';
+
+    return `<div style="min-width:130px;max-width:170px;flex-shrink:0">
+      <div onclick="navigateAndHighlight('${esc(step.schema)}','${esc(step.object)}','${esc(step.column)}','${esc(step.alias_of||'')}')"
+           title="Open in DDL and highlight '${step.column}'"
+           style="border:2px solid ${border};background:${bg};border-radius:10px;
+                  padding:8px 10px;text-align:center;cursor:pointer;position:relative">
+        ${renamed ? `<div style="position:absolute;top:-10px;left:50%;transform:translateX(-50%);
+                         background:var(--orange);color:#fff;font-size:9px;font-weight:700;
+                         padding:1px 7px;border-radius:8px;white-space:nowrap">⇒ renamed</div>` : ''}
+        ${isRoot ? `<div style="position:absolute;top:-10px;right:8px;background:var(--accent);
+                        color:#fff;font-size:9px;font-weight:700;padding:1px 7px;border-radius:8px">
+                       SELECTED</div>` : ''}
+        <div style="font-family:var(--font-mono);font-size:14px;font-weight:800;color:var(--text)">${step.column}</div>
+        ${renamed ? `<div style="font-size:9px;color:var(--orange);margin-top:1px">was: ${step.alias_of}</div>` : ''}
+        <div style="font-size:10px;color:var(--text2);margin-top:5px;overflow:hidden;text-overflow:ellipsis;
+                    white-space:nowrap" title="${step.schema}.${step.object}">${step.object}</div>
+        <div style="display:inline-block;font-size:9px;font-weight:700;color:#fff;
+                    background:${color};border-radius:6px;padding:1px 6px;margin-top:4px">
+          ${step.obj_type.replace('MATERIALIZED_VIEW','MAT_VIEW').replace(/_/g,' ')}</div>
+      </div>
+    </div>`;
+  }
+
+  const arrow = `<div style="display:flex;align-items:center;padding-top:20px;flex-shrink:0">
+    <div style="width:28px;height:2px;background:var(--border)"></div>
+    <span style="color:var(--text3);font-size:12px;margin-left:-2px">▶</span>
+  </div>`;
+
+  function section(items, label, color) {
+    if (!items.length) return '';
+    let s = `<div style="display:flex;flex-direction:column;flex-shrink:0">
+      <div style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;
+                  letter-spacing:.5px;text-align:center;margin-bottom:8px">${label}</div>
+      <div style="display:flex;align-items:flex-start;gap:0">`;
+    items.forEach((step, i) => {
+      s += card(step);
+      if (i < items.length-1) s += arrow;
+    });
+    return s + '</div></div>';
+  }
+
+  // ── Full horizontal flow ────────────────────────────────────────────
+  let html = `<div style="padding:14px 16px 6px">
+    <div style="display:flex;align-items:flex-start;overflow-x:auto;gap:0;padding-bottom:8px">`;
+
+  if (upstream.length) {
+    html += section(upstream, '↑ Upstream sources', 'var(--blue)');
+    if (central.length || downstream.length) html += `<div>${arrow}${arrow}</div>`;
+  }
+  if (central.length) {
+    html += section(central, '▣ Selected', 'var(--accent)');
+    if (downstream.length) html += `<div>${arrow}${arrow}</div>`;
+  }
+  if (downstream.length) {
+    html += section(downstream, '↓ Downstream consumers', 'var(--green)');
+  }
+
+  html += `</div>`; // flex
+
+  // ── Rename events summary ───────────────────────────────────────────
+  if (rCount) {
+    html += `<div style="margin-top:12px;border-top:1px solid var(--border2);padding-top:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:6px">
+        🔄 Rename events (${rCount})
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">`;
+    (data.renames||[]).forEach(r => {
+      html += `<div style="background:rgba(255,149,0,0.08);border:1px solid rgba(255,149,0,0.25);
+                           border-radius:7px;padding:5px 10px;font-size:11px">
+        <span style="font-family:var(--font-mono);font-weight:700;color:var(--text)">${r.from_col}</span>
+        <span style="color:var(--text3);margin:0 5px">→</span>
+        <span style="font-family:var(--font-mono);font-weight:700;color:var(--orange)">${r.to_col}</span>
+        <span style="font-size:10px;color:var(--text3);margin-left:6px">in ${r.to_obj.split('.').pop()}</span>
+      </div>`;
+    });
+    html += `</div></div>`;
+  } else if (hCount > 0) {
+    html += `<div style="margin-top:8px;font-size:11px;color:var(--text3)">
+      ✓ Column keeps the same name "<b>${col}</b>" throughout the pipeline.</div>`;
+  }
+
+  if (data.error) {
+    html += `<div style="margin-top:8px;font-size:11px;color:var(--text3)">ℹ ${data.error}</div>`;
+  }
+
+  html += `</div>`; // padding
+  body.innerHTML = html;
+}
+
+// ════════════════════════════════════════════════════════
+// Column impact simulation
+// ════════════════════════════════════════════════════════
+function simulateColumnImpact(schema, name) {
+  const sel = document.getElementById('sim-col-sel');
+  if (!sel) return;
+  simulateColumnImpactDirect(schema, name, sel.value);
+}
+
+function simulateColumnImpactDirect(schema, name, col) {
+  const res = document.getElementById('col-sim-result');
+  if (res) res.innerHTML = '<span class="spinner"></span>';
+  S.impactColumn = col;
+
+  fetch(`/impact/${schema}/${name}/column/${col}`)
+    .then(r => r.json())
+    .then(d => {
+      if (res) {
+        if (!d.total) {
+          res.innerHTML = '<span style="color:var(--green);font-size:11px">✓ No dependent objects use this column directly.</span>';
+        } else {
+          res.innerHTML = `<span style="color:var(--red);font-size:11px">⚠ ${d.breaking.length} breaking · ${d.warning.length} warnings</span>`;
         }
-
-        // Отрисовка графа
-        function drawGraph(graphData) {
-            data = graphData; // Сохраняем данные в глобальную переменную
-            svg.selectAll("*").remove();
-
-            console.log("Drawing graph with data:", data);
-
-            if (!data.nodes || data.nodes.length === 0) {
-                console.log("No nodes to display");
-                // Показываем сообщение об отсутствии данных
-                svg.append("text")
-                    .attr("x", svg.node().getBoundingClientRect().width / 2)
-                    .attr("y", svg.node().getBoundingClientRect().height / 2)
-                    .attr("text-anchor", "middle")
-                    .style("font-size", "16px")
-                    .style("fill", "#666")
-                    .text("Нет данных для отображения");
-                return;
-            }
-
-            const width = svg.node().getBoundingClientRect().width;
-            const height = svg.node().getBoundingClientRect().height;
-
-            console.log(`Canvas size: ${width}x${height}`);
-            console.log(`Nodes: ${data.nodes.length}, Links: ${data.links.length}`);
-
-            // Создаем симуляцию с лучшими настройками для больших графов
-            simulation = d3.forceSimulation(data.nodes)
-                .force("link", d3.forceLink(data.links).id(d => d.id).distance(d => {
-                    // Увеличиваем расстояние для больших графов
-                    const baseDistance = Math.max(80, Math.min(200, data.nodes.length * 5));
-                    return d.type === 'depends_on' ? baseDistance : baseDistance * 1.2;
-                }))
-                .force("charge", d3.forceManyBody().strength(d => {
-                    // Сила отталкивания зависит от количества узлов
-                    return Math.max(-1000, -50 * data.nodes.length);
-                }))
-                .force("center", d3.forceCenter(width / 2, height / 2))
-                .force("collision", d3.forceCollide().radius(d => d.isCentral ? 30 : 20));
-
-            // Создаем стрелки
-            svg.append("defs").selectAll("marker")
-                .data(["arrow-depends-on", "arrow-used-by"])
-                .enter().append("marker")
-                .attr("id", d => d)
-                .attr("viewBox", "0 -5 10 10")
-                .attr("refX", 20)
-                .attr("refY", 0)
-                .attr("markerWidth", 6)
-                .attr("markerHeight", 6)
-                .attr("orient", "auto")
-                .append("path")
-                .attr("d", "M0,-5L10,0L0,5")
-                .attr("fill", d => d === 'arrow-depends-on' ? "#4CAF50" : "#FF9800");
-
-            // Создаем связи
-            const link = svg.append("g")
-                .selectAll("line")
-                .data(data.links)
-                .enter().append("line")
-                .attr("class", "link")
-                .attr("stroke-width", 2)
-                .attr("stroke", d => d.type === 'depends_on' ? "#4CAF50" : "#FF9800")
-                .attr("stroke-opacity", 0.6)
-                .attr("marker-end", d => d.type === 'depends_on' ? "url(#arrow-depends-on)" : "url(#arrow-used-by)");
-
-            // Создаем узлы
-            const node = svg.append("g")
-                .selectAll(".node")
-                .data(data.nodes)
-                .enter().append("g")
-                .attr("class", "node")
-                .on("click", showDDL)
-                .on("dblclick", reloadGraph)
-                .call(d3.drag()
-                    .on("start", dragstarted)
-                    .on("drag", dragged)
-                    .on("end", dragended));
-
-            node.append("circle")
-                .attr("r", d => d.isCentral ? 25 : Math.max(12, 20 - data.nodes.length * 0.5))
-                .style("fill", d => getNodeColor(d.type))
-                .style("stroke", d => d.isCentral ? "#000" : "#fff")
-                .style("stroke-width", d => d.isCentral ? "3px" : "1.5px");
-
-            node.append("text")
-                .attr("dx", 12)
-                .attr("dy", ".35em")
-                .text(d => d.name)
-                .style("font-size", d => Math.max(8, 14 - data.nodes.length * 0.2) + "px")
-                .style("font-weight", d => d.isCentral ? "bold" : "normal")
-                .style("pointer-events", "none");
-
-            // Обновляем позиции при каждом тике симуляции
-            simulation.on("tick", () => {
-                // Ограничиваем позиции в пределах canvas
-                node.attr("transform", d => {
-                    d.x = Math.max(20, Math.min(width - 20, d.x));
-                    d.y = Math.max(20, Math.min(height - 20, d.y));
-                    return `translate(${d.x},${d.y})`;
-                });
-
-                link
-                    .attr("x1", d => d.source.x)
-                    .attr("y1", d => d.source.y)
-                    .attr("x2", d => d.target.x)
-                    .attr("y2", d => d.target.y);
-            });
-
-            // Запускаем симуляцию на более длительное время для больших графов
-            const simulationDuration = Math.min(10000, data.nodes.length * 100);
-            setTimeout(() => {
-                simulation.stop();
-                console.log("Simulation stopped");
-            }, simulationDuration);
-
-            // Создаем легенду
-            createLegend();
-
-            // Сбрасываем позицию легенды при новом графе
-            const legend = document.getElementById('legend');
-            legend.style.left = 'auto';
-            legend.style.top = 'auto';
-            legend.style.right = '10px';
-
-            // Очищаем DDL при новой загрузке графа
-            document.getElementById('ddl-display').value = '';
-
-            console.log("Graph rendering completed");
+      }
+      if (d.total) {
+        activateImpactMode(d, `Simulating drop of "${col}" — ${d.total} objects affected`);
+        switchTab('impact');
+        if (S.selectedNode) {
+          document.getElementById('inspector-body')._impactData = d;
+          displayImpact(d, S.selectedNode, document.getElementById('inspector-body'));
         }
+      }
+    });
+}
 
-        // Получение цвета узла в зависимости от типа объекта
-        function getNodeColor(type) {
-            const colors = {
-                'TABLE': '#4CAF50',
-                'VIEW': '#2196F3',
-                'MATERIALIZED_VIEW': '#9C27B0',
-                'FUNCTION': '#FF9800',
-                'PROCEDURE': '#795548'
-            };
-            return colors[type] || '#607D8B';
-        }
+// ════════════════════════════════════════════════════════
+// Status bar controls
+// ════════════════════════════════════════════════════════
+function setDirection(el) {
+  document.querySelectorAll('.seg-opt').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  S.direction = el.dataset.dir;
+  // Immediately reload graph with new direction
+  if (S.currentSchema && S.currentObject) reloadCurrentGraph();
+}
 
-        // Создание легенды
-        function createLegend() {
-            const legendContent = d3.select(".legend-content");
-            legendContent.selectAll("*").remove();
+function onDepthSlider(val) {
+  S.depth = parseInt(val);
+  document.getElementById('sb-depth-val').textContent = val;
+  document.getElementById('dov-val').textContent = val;
+}
 
-            const types = ['TABLE', 'VIEW', 'MATERIALIZED_VIEW', 'FUNCTION', 'PROCEDURE'];
-            const directions = [
-                { name: '↓ зависит от', color: '#4CAF50' },
-                { name: '↑ используется в', color: '#FF9800' }
-            ];
+function adjustDepth(delta) {
+  const slider = document.getElementById('sb-depth-slider');
+  const v = Math.max(1, Math.min(20, parseInt(slider.value) + delta));
+  slider.value = v; onDepthSlider(v);
+}
 
-            // Типы объектов
-            const typeItems = legendContent.selectAll(".type-item")
-                .data(types)
-                .enter().append("div")
-                .attr("class", "legend-item")
-                .style("display", "flex")
-                .style("align-items", "center")
-                .style("margin-bottom", "2px")
-                .style("font-size", "11px");
+// ════════════════════════════════════════════════════════
+// Global search
+// ════════════════════════════════════════════════════════
+function onGlobalSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  const drop = document.getElementById('search-drop');
+  if (q.length < 2) { drop.innerHTML=''; drop.classList.remove('open'); return; }
 
-            typeItems.append("div")
-                .style("width", "8px")
-                .style("height", "8px")
-                .style("border-radius", "50%")
-                .style("background-color", d => getNodeColor(d))
-                .style("margin-right", "5px");
+  fetch(`/search?q=${encodeURIComponent(q)}`)
+    .then(r => r.json())
+    .then(results => renderSearchDrop(results, drop));
+}
 
-            typeItems.append("span")
-                .text(d => d.toLowerCase());
+function renderSearchDrop(results, drop) {
+  if (!results.length) {
+    drop.innerHTML = '<div class="sd-empty">No results found</div>';
+    drop.classList.add('open');
+    return;
+  }
+  const objs = results.filter(r => r.result_type === 'object');
+  const cols  = results.filter(r => r.result_type === 'column');
 
-            // Направления связей
-            const directionItems = legendContent.selectAll(".direction-item")
-                .data(directions)
-                .enter().append("div")
-                .attr("class", "legend-item")
-                .style("display", "flex")
-                .style("align-items", "center")
-                .style("margin-bottom", "2px")
-                .style("font-size", "11px");
+  let html = '';
+  if (objs.length) {
+    html += '<div class="sd-section"><div class="sd-label">Objects</div>';
+    objs.slice(0,12).forEach(r => {
+      html += `<div class="sd-item" onclick="searchSelect('${esc(r.schema)}','${esc(r.name)}')">
+        <span class="sd-icon">${ti(r.type)}</span>
+        <span class="sd-name">${r.name}</span>
+        <span class="sd-sub">${r.schema}</span>
+        <span class="sd-badge">${r.type.replace('_',' ')}</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+  if (cols.length) {
+    html += '<div class="sd-section"><div class="sd-label">Columns</div>';
+    cols.slice(0,8).forEach(r => {
+      html += `<div class="sd-item" onclick="searchSelect('${esc(r.schema)}','${esc(r.name)}')">
+        <span class="sd-icon">◻</span>
+        <span class="sd-name">${r.column}</span>
+        <span class="sd-sub">${r.schema}.${r.name}</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+  drop.innerHTML = html;
+  drop.classList.add('open');
+}
 
-            directionItems.append("span")
-                .style("color", d => d.color)
-                .style("font-weight", "bold")
-                .style("margin-right", "3px")
-                .text(d => d.name);
+function searchSelect(schema, name) {
+  closeSearch();
+  document.getElementById('schema-select').value = schema;
+  onSchemaChange(schema);
+  S.currentObject = name;
+  setTimeout(() => selectObject(schema, name), 400);
+}
 
-            directionItems.append("span")
-                .text("");
-        }
+function closeSearch() {
+  document.getElementById('search-drop').classList.remove('open');
+}
 
-        // Сворачивание/разворачивание легенды
-        function initLegendToggle() {
-            const legend = document.getElementById('legend');
-            const legendHeader = legend.querySelector('.legend-header');
+// ════════════════════════════════════════════════════════
+// Export
+// ════════════════════════════════════════════════════════
+function exportJSON() {
+  if (!S.graphData) { alert('No graph data to export.'); return; }
+  const name = `${S.currentSchema}.${S.currentObject}.json`;
+  const blob = new Blob([JSON.stringify(S.graphData, null, 2)], {type:'application/json'});
+  _dl(URL.createObjectURL(blob), name);
+}
 
-            legendHeader.addEventListener('click', function(e) {
-                e.stopPropagation();
-                legend.classList.toggle('collapsed');
-            });
-        }
+function exportPNG() {
+  const svgEl = document.getElementById('graph-svg');
+  const rect = svgEl.getBoundingClientRect();
+  const W = rect.width||800, H = rect.height||600;
+  const svg = new XMLSerializer().serializeToString(svgEl);
+  const blob = new Blob([svg], {type:'image/svg+xml'});
+  const url = URL.createObjectURL(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = W*2; canvas.height = H*2;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(2,2); ctx.fillStyle='#f5f5f7'; ctx.fillRect(0,0,W,H);
+  const img = new Image();
+  img.onload = () => {
+    ctx.drawImage(img,0,0,W,H);
+    URL.revokeObjectURL(url);
+    _dl(canvas.toDataURL('image/png'), `${S.currentSchema||'graph'}.${S.currentObject||'graph'}.png`);
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); alert('PNG export failed.'); };
+  img.src = url;
+}
 
-        // Подсветка объектов в DDL
-        function highlightDDLObjects(ddl, nodes) {
-            let highlightedDDL = ddl;
+function _dl(href, filename) {
+  const a = document.createElement('a');
+  a.href=href; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
 
-            // Собираем лист имен объектов графа
-            const graphObjectNames = new Set(nodes.map(node => node.name.toLowerCase()));
+// ════════════════════════════════════════════════════════
+// Utilities
+// ════════════════════════════════════════════════════════
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function esc(s) { return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+function debounce(fn, ms) {
+  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
 
-            // Сначала подсвечиваем оранжевым цветом объекты, которые есть на графе
-            graphObjectNames.forEach(objName => {
-                const regex = new RegExp(`\\b${objName}\\b`, 'gi');
-                highlightedDDL = highlightedDDL.replace(regex, (match) => {
-                    return `<span class="graph-object-highlight" style="background-color: #FF980033; color: #FF9800; font-weight: bold;">${match}</span>`;
-                });
-            });
+// ════════════════════════════════════════════════════════
+// No-connections banner
+// ════════════════════════════════════════════════════════
+function showNoConnectionsBanner(objLabel, direction, dirHint, noiseHint) {
+  const el = document.getElementById('no-conn-banner');
+  const dirMsg = {
+    both:       `⚠ ${objLabel} has no schema-level dependencies detected.`,
+    upstream:   `ℹ ${objLabel} has no upstream connections (not used by any view or function).`,
+    downstream: `ℹ ${objLabel} has no downstream connections (does not reference other objects).`,
+  }[direction] || `⚠ No connections found for ${objLabel}.`;
 
-            // Затем подсвечиваем синим цветом объекты, которые есть в графе, с типами
-            const sortedNodes = [...nodes].sort((a, b) => b.name.length - a.name.length);
-            sortedNodes.forEach(node => {
-                const regex = new RegExp(`<span class="graph-object-highlight"[^>]*>(${node.name})</span>`, 'gi');
-                const replacement = `<span class="highlighted-object" data-schema="${node.schema}" data-name="${node.name}" style="background-color: ${getNodeColor(node.type)}33; color: ${getNodeColor(node.type)}; font-weight: bold;">${node.name}</span>`;
-                highlightedDDL = highlightedDDL.replace(regex, replacement);
-            });
+  const hint = dirHint || (direction === 'both'
+    ? ' This may be an isolated object, or its dependencies use dynamic SQL that cannot be statically analyzed.'
+    : '');
 
-            document.getElementById('ddl-display').innerHTML = highlightedDDL;
+  el.innerHTML = dirMsg + hint;
+  el.style.display = 'block';
+  // Auto-hide after 8 seconds
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => hideNoConnectionsBanner(), 8000);
+}
 
-            // Добавляем обработчики кликов для подсвеченных объектов
-            document.querySelectorAll('.highlighted-object').forEach(span => {
-                span.addEventListener('click', function() {
-                    const schema = this.getAttribute('data-schema');
-                    const name = this.getAttribute('data-name');
-                    fetch(`/graph/${schema}/${name}`)
-                        .then(response => response.json())
-                        .then(data => {
-                            drawGraph(data);
-                        });
-                });
-            });
-        }
+function hideNoConnectionsBanner() {
+  const el = document.getElementById('no-conn-banner');
+  if (el) { el.style.display = 'none'; clearTimeout(el._timer); }
+}
 
-        // Отображение DDL объекта
-        function showDDL(event, d) {
-            event.preventDefault();
-            fetch(`/ddl/${d.schema}/${d.name}`)
-                .then(response => response.text())
-                .then(ddl => {
-                    document.getElementById('ddl-display').value = ddl;
-                    // Используем текущие nodes из глобальной переменной data
-                    if (data && data.nodes) {
-                        highlightDDLObjects(ddl, data.nodes);
-                    }
-                });
-        }
+// ════════════════════════════════════════════════════════
+// Resize handles
+// ════════════════════════════════════════════════════════
+function initResize() {
+  function makeResizer(handleId, targetEl, side) {
+    const handle = document.getElementById(handleId);
+    if (!handle) return;
+    let dragging = false, startX = 0, startW = 0;
 
-        // Перезагрузка графа с новым корневым объектом
-        function reloadGraph(event, d) {
-            event.preventDefault();
-            tooltip.style("opacity", 0);
-            fetch(`/graph/${d.schema}/${d.name}`)
-                .then(response => response.json())
-                .then(data => {
-                    drawGraph(data);
-                });
-        }
+    handle.addEventListener('mousedown', e => {
+      dragging = true;
+      startX = e.clientX;
+      startW = targetEl.offsetWidth;
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const delta = e.clientX - startX;
+      const newW = side === 'left'
+        ? Math.max(150, Math.min(500, startW + delta))
+        : Math.max(200, Math.min(600, startW - delta));
+      targetEl.style.width = newW + 'px';
+      targetEl.style.flex  = 'none';
+    });
+    document.addEventListener('mouseup', () => {
+      dragging = false;
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    });
+  }
+  makeResizer('left-resize',  document.getElementById('sidebar'),   'left');
+  makeResizer('right-resize', document.getElementById('inspector'),  'right');
+}
 
-        // Функции для обработки перетаскивания узлов
-        function dragstarted(event) {
-            if (!event.active) simulation.alphaTarget(0.3).restart();
-            event.subject.fx = event.subject.x;
-            event.subject.fy = event.subject.y;
-        }
+// ════════════════════════════════════════════════════════
+// Metadata popup
+// ════════════════════════════════════════════════════════
+const metaCache = {};
+let metaTimer = null;
 
-        function dragged(event) {
-            event.subject.fx = event.x;
-            event.subject.fy = event.y;
-        }
+function showMetaPopup(event, schema, name) {
+  clearTimeout(metaTimer);
+  metaTimer = setTimeout(() => _doShowMeta(event, schema, name), 350);
+}
 
-        function dragended(event) {
-            if (!event.active) simulation.alphaTarget(0);
-            event.subject.fx = null;
-            event.subject.fy = null;
-        }
+function _doShowMeta(event, schema, name) {
+  const popup = document.getElementById('meta-popup');
+  document.getElementById('mp-name').textContent = name;
+  document.getElementById('mp-type-tag').innerHTML = '';
+  document.getElementById('mp-body').innerHTML = '<div class="mp-loading"><span class="spinner"></span></div>';
 
-        // Инициализация функций легенды
-        function initLegendFunctions() {
-            initLegendToggle();
-        }
+  // Position near cursor
+  const x = Math.min(event.clientX + 16, window.innerWidth - 300);
+  const y = Math.min(event.clientY + 8,  window.innerHeight - 180);
+  popup.style.left = x + 'px';
+  popup.style.top  = y + 'px';
+  popup.classList.add('visible');
 
-        // Скрытие подсказки при клике вне графа
-        document.addEventListener('click', function(event) {
-            if (!event.target.closest('.node') && !event.target.closest('#legend')) {
-                tooltip.style("opacity", 0);
-            }
-        });
+  const key = `${schema}.${name}`;
+  if (metaCache[key]) { _renderMeta(metaCache[key]); return; }
 
-        // Инициализация при загрузке страницы
-        window.onload = function() {
-            init();
-            initLegendFunctions();
-        };
-    </script>
+  fetch(`/metadata/${schema}/${name}`)
+    .then(r => r.json())
+    .then(m => { metaCache[key] = m; _renderMeta(m); });
+}
+
+function _renderMeta(m) {
+  document.getElementById('mp-name').textContent = m.name || '—';
+  document.getElementById('mp-type-tag').innerHTML = m.object_type ? buildTag(m.object_type.replace(' ','_').toUpperCase()) : '';
+
+  const row = (k, v) => v != null
+    ? `<div class="mp-row"><span class="mp-key">${k}</span><span class="mp-val">${v}</span></div>`
+    : '';
+
+  document.getElementById('mp-body').innerHTML =
+    row('Schema',  m.schema) +
+    row('Owner',   m.owner) +
+    row('Size',    m.size) +
+    row('Est. rows', m.est_rows != null ? Number(m.est_rows).toLocaleString() : null) +
+    row('Analyzed', m.last_analyze ? m.last_analyze.slice(0,10) : 'never') +
+    (m.description ? `<div style="font-size:10px;color:var(--text2);margin-top:5px;font-style:italic">${m.description}</div>` : '');
+}
+
+function hideMetaPopup() {
+  clearTimeout(metaTimer);
+  document.getElementById('meta-popup').classList.remove('visible');
+}
+
+// Show metadata popup on graph node hover (enhanced)
+function initGraphNodeMeta() {
+  // Called from drawGraph — nodes have onmouseover/onmouseout already
+  // We piggyback by overriding the g-tooltip logic with metadata
+}
+
+// Initialise on load
+window.addEventListener('load', () => {
+  initResize();
+  // Hide popup on scroll
+  document.getElementById('sidebar-body').addEventListener('scroll', hideMetaPopup);
+});
+
+function closeAttrPanel() {
+  const p = document.getElementById('attr-panel');
+  if (p) p.style.display = 'none';
+  // Clear evolution markers from graph
+  S.evolutionTrace = null;
+  if (S.graphData) drawGraph(S.graphData);
+}
+
+// ── Navigate to object, switch to DDL tab, highlight column ──────────────────
+function navigateAndHighlight(schema, name, colName, aliasOf) {
+  // 1. Select the object (rebuilds graph, loads metadata)
+  selectObject(schema, name);
+
+  // 2. Switch inspector to DDL tab
+  switchTab('ddl');
+
+  // 3. Store pending highlight — will be applied after DDL loads
+  S.pendingDDLHighlight = { col: colName, aliasOf: aliasOf || null };
+}
+
+// Called after DDL is rendered — apply pending column highlight
+function _applyDDLHighlight(ddlHtml) {
+  const hl = S.pendingDDLHighlight;
+  if (!hl) return ddlHtml;
+  S.pendingDDLHighlight = null;
+
+  let out = ddlHtml;
+  const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Highlight target column (current name)
+  const re = new RegExp(`\\b(${escRe(hl.col)})\\b`, 'g');
+  out = out.replace(re, (match) => {
+    const wasNote = hl.aliasOf && hl.aliasOf !== hl.col
+      ? ` <span style="background:var(--orange);color:#fff;font-size:9px;font-weight:700;
+               border-radius:4px;padding:0 4px;vertical-align:middle">was: ${hl.aliasOf}</span>`
+      : '';
+    return `<mark style="background:rgba(0,122,255,0.25);border-radius:3px;padding:1px 2px;
+                         outline:2px solid var(--accent)" data-evo-col="${hl.col}">${match}</mark>${wasNote}`;
+  });
+
+  // Scroll to first mark after render
+  setTimeout(() => {
+    const mark = document.querySelector('[data-evo-col]');
+    if (mark) mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 150);
+
+  return out;
+}
+
+function toggleLegend(btn) {
+  const b = document.getElementById('gl-body');
+  const h = b.style.display === 'none';
+  b.style.display = h ? '' : 'none'; btn.textContent = h ? '▼' : '▶';
+}
+</script>
 </body>
 </html>
